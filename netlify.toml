@@ -1,0 +1,28 @@
+[build]
+  # Monorepo: Netlify's own "Base directory" site setting can do this too,
+  # but pinning it here means a fresh site connected to this repo builds
+  # correctly with zero manual configuration in the Netlify UI.
+  base = "apps/web"
+  command = "npm run build"
+  publish = "dist"
+
+[[redirects]]
+  # SPA fallback for Vue Router history mode.
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "geolocation=(), camera=(), microphone=()"
+    # netlify.toml has no env-var interpolation for header values (this is a
+    # static TOML file, not templated at build time) — so this must be
+    # hand-edited to the real backend origin once the backend host exists.
+    # Still http://localhost:3000 today because that's genuinely the only
+    # origin that has ever served this API — updating this to a fake/guessed
+    # production URL would be a false claim. See DEPLOYMENT.md § Backend.
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://localhost:3000"

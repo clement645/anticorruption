@@ -32,12 +32,20 @@ later; that is a Phase 14 hardening concern, not required for Phase 1.
 
 ## Frontend — Netlify
 
-`apps/web/netlify.toml`:
-- Build command: `npm run build` (from `apps/web`)
-- Publish directory: `dist`
-- SPA fallback: all routes rewrite to `/index.html` (Vue Router history mode)
+Root `netlify.toml` (deliberately at the repo root, not inside `apps/web` — Netlify
+looks for it there by default when connecting a monorepo, so a fresh site needs no
+manual "base directory" configuration in the Netlify UI):
+- `base = "apps/web"`, build command `npm run build`, publish directory `dist`.
+- SPA fallback: all routes rewrite to `/index.html` (Vue Router history mode).
 - Security headers: `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`,
-  `Content-Security-Policy` (tightened per-phase as real external origins are known)
+  `Content-Security-Policy`.
+- **Pending, honest gap, not yet closed:** the CSP's `connect-src` and
+  `VITE_API_BASE_URL` (in `.env.example`, set per Netlify site as an environment
+  variable) both still point at `http://localhost:3000` — the only origin that has
+  ever actually served this API. Both need a one-line update to the real backend
+  origin once the backend is actually hosted somewhere (see § Backend below) —
+  `netlify.toml` has no build-time variable interpolation for header values, so this
+  is a manual edit, not something that resolves itself from an env var alone.
 - Only `VITE_*`-prefixed environment variables are ever read by the frontend build.
   **Never** place `JWT_SECRET`, `DATABASE_URL`, encryption keys, or any backend secret
   in a Netlify frontend environment variable — those live only in the backend host's
