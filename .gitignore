@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+.output/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Prisma
+packages/database/generated/
+
+# Evidence vault (Phase 10 filesystem object storage adapter — encrypted
+# local files, never committed; see apps/api/.env EVIDENCE_STORAGE_PATH)
+apps/api/storage/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Testing
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Netlify
+.netlify/
+
+# Misc
+*.pem
+*.key
+!packages/**/*.key.example

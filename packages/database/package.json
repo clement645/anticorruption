@@ -1,0 +1,28 @@
+{
+  "name": "@bpfmps/database",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prisma schema, migrations, and PrismaService wrapper shared by apps/api",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "prisma:seed": "tsx prisma/seed.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "argon2": "^0.45.1"
+  },
+  "devDependencies": {
+    "prisma": "^6.19.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,1664 @@
+// B-PFMPS Prisma schema.
+//
+// Built incrementally, phase by phase (see /DATABASE.md for the full table roadmap).
+// Phase 2 (IAM) introduces the first real tables below: organizations, departments,
+// users, roles, permissions, sessions, devices, MFA methods, API keys, digital
+// identities, and security events.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Organizational structure (section 8)
+// ---------------------------------------------------------------------------
+
+enum OrganizationType {
+  NATIONAL_GOVERNMENT
+  MINISTRY
+  AGENCY
+  COUNTY
+  COUNTY_DEPARTMENT
+  PUBLIC_INSTITUTION
+}
+
+model Organization {
+  id       String           @id @default(uuid())
+  name     String
+  code     String           @unique
+  type     OrganizationType
+  parentId String?
+  parent   Organization?    @relation("OrganizationHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children Organization[]   @relation("OrganizationHierarchy")
+
+  departments          Department[]
+  users                User[]
+  budgets              BudgetPlan[]
+  allocations          Allocation[]
+  procurementPlans     ProcurementPlan[]
+  procurementRequests  ProcurementRequest[]
+  contracts            Contract[]
+  projects             Project[]
+  whistleblowerReports Report[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parentId])
+  @@map("organizations")
+}
+
+model Department {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  code           String
+
+  users User[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("departments")
+}
+
+// ---------------------------------------------------------------------------
+// RBAC (section 4)
+// ---------------------------------------------------------------------------
+
+model Role {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+  // System roles (e.g. Super Administrator) cannot be deleted or renamed through
+  // the application API.
+  isSystem    Boolean @default(false)
+
+  permissions     RolePermission[]
+  userAssignments UserRole[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("roles")
+}
+
+// A permission is a (resource, action) pair, e.g. ("budget", "approve"),
+// ("procurement", "publish_tender"). Kept deliberately coarse-grained here —
+// fine-grained conditions (threshold, jurisdiction, procurement stage) are
+// evaluated by the ABAC policy engine layered on top in a later phase, not
+// encoded as separate permission rows.
+model Permission {
+  id          String  @id @default(uuid())
+  resource    String
+  action      String
+  description String?
+
+  roles RolePermission[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([resource, action])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleId String
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+// ---------------------------------------------------------------------------
+// Users & authentication (section 5)
+// ---------------------------------------------------------------------------
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  LOCKED
+  PENDING_ACTIVATION
+}
+
+model User {
+  id             String        @id @default(uuid())
+  email          String        @unique
+  passwordHash   String
+  firstName      String
+  lastName       String
+  status         UserStatus    @default(PENDING_ACTIVATION)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  departmentId   String?
+  department     Department?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+
+  roles             UserRole[]
+  sessions          Session[]
+  devices           Device[]
+  mfaMethods        MfaMethod[]
+  apiKeys           ApiKey[]
+  digitalIdentities DigitalIdentity[]
+  securityEvents    SecurityEvent[]
+  auditEvents       AuditEvent[]
+
+  budgetsCreated       BudgetPlan[]       @relation("BudgetCreatedBy")
+  budgetsApproved      BudgetPlan[]       @relation("BudgetApprovedBy")
+  commitments          Commitment[]
+  expenditures         Expenditure[]
+  adjustmentsRequested BudgetAdjustment[] @relation("AdjustmentRequestedBy")
+  adjustmentsApproved  BudgetAdjustment[] @relation("AdjustmentApprovedBy")
+
+  procurementPlansCreated      ProcurementPlan[]    @relation("ProcurementPlanCreatedBy")
+  procurementPlansApproved     ProcurementPlan[]    @relation("ProcurementPlanApprovedBy")
+  procurementRequestsRequested ProcurementRequest[] @relation("ProcurementRequestRequestedBy")
+  procurementRequestsApproved  ProcurementRequest[] @relation("ProcurementRequestApprovedBy")
+  tendersCreated               Tender[]
+  bidsSubmitted                Bid[]
+  bidEvaluations               BidEvaluation[]
+  awardsGiven                  Award[]
+
+  supplierDocumentsUploaded SupplierDocument[]    @relation("SupplierDocumentUploadedBy")
+  supplierDocumentsVerified SupplierDocument[]    @relation("SupplierDocumentVerifiedBy")
+  supplierRiskAssessments   SupplierRiskProfile[] @relation("SupplierRiskAssessedBy")
+
+  riskAlertsReviewed RiskAlert[]
+
+  contractsCreated       Contract[]              @relation("ContractCreatedBy")
+  contractsSigned        Contract[]              @relation("ContractSignedBy")
+  purchaseOrdersIssued   PurchaseOrder[]
+  invoicesSubmitted      Invoice[]               @relation("InvoiceSubmittedBy")
+  invoicesVerified       Invoice[]               @relation("InvoiceVerifiedBy")
+  paymentApprovals       PaymentApproval[]
+  paymentsExecuted       Payment[]
+  paymentReconciliations PaymentReconciliation[]
+
+  projectsCreated      Project[]
+  inspectionsPerformed Inspection[]
+  evidenceUploaded     ProjectEvidence[]
+
+  whistleblowerReportsAssigned Report[]       @relation("WhistleblowerReportAssignedTo")
+  whistleblowerUpdatesPosted   ReportUpdate[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([departmentId])
+  @@map("users")
+}
+
+model Device {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fingerprint String
+  name        String?
+  userAgent   String?
+  trusted     Boolean  @default(false)
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  sessions Session[]
+
+  @@unique([userId, fingerprint])
+  @@map("devices")
+}
+
+// A refresh-token session. The refresh token itself is never stored — only its
+// SHA-256 hash. `rotatedToId` links a rotated-out session to the session that
+// replaced it, which is what makes reuse detection possible: if a refresh token
+// belonging to an already-rotated session is ever presented again, the entire
+// chain is revoked (see SECURITY.md § Identity & Authentication).
+model Session {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId         String?
+  device           Device?   @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  refreshTokenHash String    @unique
+  ipAddress        String?
+  userAgent        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  revokedReason    String?
+  rotatedToId      String?   @unique
+  rotatedTo        Session?  @relation("SessionRotation", fields: [rotatedToId], references: [id], onDelete: SetNull)
+  rotatedFrom      Session?  @relation("SessionRotation")
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+enum MfaType {
+  TOTP
+  BACKUP_CODES
+}
+
+model MfaMethod {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type             MfaType
+  // TOTP secret is encrypted at rest (application-level, see packages/crypto in a
+  // later phase); backup codes are stored hashed, never in cleartext.
+  secretEncrypted  String?
+  backupCodeHashes String[]
+  enabled          Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  @@unique([userId, type])
+  @@map("mfa_methods")
+}
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  keyHash    String    @unique
+  scopes     String[]
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("api_keys")
+}
+
+// Placeholder for the digital-signature abstraction (section 6). Populated once
+// application-level signing keys (and later government PKI/HSM key references)
+// are issued in Phase 3.
+model DigitalIdentity {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  keyId     String    @unique
+  publicKey String
+  algorithm String
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("digital_identities")
+}
+
+// ---------------------------------------------------------------------------
+// Security events (section 5 / SECURITY.md) — append-only.
+// ---------------------------------------------------------------------------
+
+model SecurityEvent {
+  id        String   @id @default(uuid())
+  type      String
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  ipAddress String?
+  userAgent String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("security_events")
+}
+
+// ---------------------------------------------------------------------------
+// Immutable audit trail (section 7) — append-only, hash-chained, signed.
+//
+// No application code issues UPDATE/DELETE against this table (see
+// DATABASE.md § Conventions). `sequence` gives a strict total order — writes
+// are serialized with a Postgres advisory lock (see AuditService.append) so
+// concurrent appends cannot fork the chain. `currentHash` links to the prior
+// event's `currentHash` via `previousHash`; every event is additionally
+// signed (Ed25519) so tampering is detectable even by someone with direct
+// database access, not only through the application.
+// ---------------------------------------------------------------------------
+
+model AuditEvent {
+  id       String @id @default(uuid())
+  sequence BigInt @unique @default(autoincrement())
+
+  eventType       String
+  actorId         String?
+  actor           User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  // Immutable snapshot of the actor id/email at the time of the event — NOT a
+  // foreign key, so nothing (including `actorId` above going SET NULL when a
+  // User is later deleted) ever changes it after insert. The hash chain is
+  // computed from this snapshot, never from the live `actorId` relation
+  // column — a hash frozen at write time must never be invalidated later by
+  // an unrelated, legitimate FK cascade (see AuditService for the incident
+  // this caught during Phase 3 testing).
+  actorIdSnapshot String?
+  actorEmail      String?
+  organizationId  String?
+  resourceType    String?
+  resourceId      String?
+  action          String
+  payload         Json?
+
+  payloadHash  String
+  previousHash String
+  currentHash  String
+
+  signature      String
+  signatureKeyId String
+
+  ipAddress     String?
+  userAgent     String?
+  requestId     String?
+  correlationId String?
+
+  // Populated exactly once, from NULL, by the Phase 4 anchoring job — see
+  // DATABASE.md § Conventions for why this is the sole narrow exception to
+  // "no UPDATE ever" on this table: it is metadata *about* an already-signed
+  // event, added later by an independent process, and is never itself part
+  // of the hash chain or the signature. A loose string reference (not a
+  // foreign key) to blockchain_transactions.id — deliberately uncoupled, per
+  // "the blockchain acts as an independent integrity layer" (section 1).
+  blockchainTxRef String?
+
+  createdAt DateTime @default(now())
+
+  @@index([eventType])
+  @@index([actorId])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+  @@map("audit_events")
+}
+
+// ---------------------------------------------------------------------------
+// Blockchain integrity layer (Phase 4, section 40/54) — a permissioned-ledger
+// simulation for this prototype (`DevelopmentLedgerAdapter`). Kept in its own
+// tables, deliberately decoupled from audit_events (no foreign key between
+// them — see AuditEvent.blockchainTxRef), so the ledger implementation can be
+// swapped for a real permissioned blockchain (Hyperledger Fabric/Besu) later
+// without an application-level schema migration cascading through it.
+// ---------------------------------------------------------------------------
+
+enum BlockchainTransactionStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+model BlockchainTransaction {
+  id          String                      @id @default(uuid())
+  eventType   String
+  payloadHash String
+  status      BlockchainTransactionStatus @default(PENDING)
+  metadata    Json?
+
+  blockId String?
+  block   BlockchainAnchor? @relation(fields: [blockId], references: [id], onDelete: SetNull)
+
+  submittedAt DateTime  @default(now())
+  confirmedAt DateTime?
+
+  @@index([eventType])
+  @@index([status])
+  @@index([blockId])
+  @@map("blockchain_transactions")
+}
+
+// A "block" in the simulated ledger. The dev adapter finalizes one block per
+// recorded transaction immediately (no real network consensus delay); a
+// future PermissionedBlockchainAdapter would batch multiple transactions per
+// block on a real interval. `sequence` is a real Postgres bigserial giving a
+// strict total order, exactly as with AuditEvent — the same concurrency
+// hazards (and the same pg_advisory_xact_lock fix) apply here.
+model BlockchainAnchor {
+  id                String @id @default(uuid())
+  sequence          BigInt @unique @default(autoincrement())
+  previousBlockHash String
+  blockHash         String
+  rootHash          String
+  transactionCount  Int    @default(1)
+
+  transactions BlockchainTransaction[]
+
+  createdAt DateTime @default(now())
+
+  @@map("blockchain_anchors")
+}
+
+// ---------------------------------------------------------------------------
+// Budget Management (Phase 5, section 9/10) — the first business module.
+//
+// Scope decisions, documented here rather than left implicit:
+// - Vote/Program/SubProgram (section 9's classification hierarchy) are kept
+//   as plain descriptive fields on BudgetLine, not separate normalized
+//   tables — the full Kenyan PFM classification tree is deep, and modeling
+//   it as free-form classification fields keeps this phase focused on what
+//   actually matters here: ceiling enforcement and commitment control.
+// - This is commitment-control accounting (running authorized/committed/
+//   spent balances per Allocation, enforced transactionally with a row lock
+//   plus a DB CHECK constraint as a backstop) — not a full double-entry
+//   ledger with a chart of accounts. "Double-entry principles where
+//   applicable" is satisfied by every state transition atomically updating
+//   both the source and destination bucket (e.g. committing moves nothing
+//   between accounts yet, but consuming a commitment atomically decreases
+//   `committedAmount` and increases `spentAmount` by the same amount in one
+//   transaction — money is always accounted for in exactly one bucket).
+// - Expenditure here references a Commitment directly. Once Phase 9 adds
+//   Invoices, invoice approval becomes the real trigger for an Expenditure;
+//   this phase's direct path exists so budget execution can be demonstrated
+//   and tested end-to-end before Procurement/Contracts/Invoices exist.
+// ---------------------------------------------------------------------------
+
+enum FiscalYearStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+}
+
+model FiscalYear {
+  id        String           @id @default(uuid())
+  name      String           @unique // e.g. "2026/2027"
+  startDate DateTime
+  endDate   DateTime
+  status    FiscalYearStatus @default(DRAFT)
+
+  budgets          BudgetPlan[]
+  procurementPlans ProcurementPlan[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("fiscal_years")
+}
+
+enum BudgetStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+// Named BudgetPlan (mapped to table "budgets") to avoid colliding with the
+// Prisma-generated `Budget` name being awkward alongside `BudgetLine`,
+// `BudgetAdjustment`, etc. in generated-client imports — purely a naming
+// choice, no semantic difference from "Budget" in the spec.
+model BudgetPlan {
+  id             String       @id @default(uuid())
+  fiscalYearId   String
+  fiscalYear     FiscalYear   @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  name           String
+  description    String?
+  status         BudgetStatus @default(DRAFT)
+
+  createdById String?
+  createdBy   User?   @relation("BudgetCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  approvedById String?
+  approvedBy   User?     @relation("BudgetApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+  rejectedAt   DateTime?
+
+  lines BudgetLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([fiscalYearId, organizationId, name])
+  @@index([organizationId])
+  @@index([fiscalYearId])
+  @@map("budgets")
+}
+
+model BudgetLine {
+  id       String     @id @default(uuid())
+  budgetId String
+  budget   BudgetPlan @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  code             String // unique within the budget, e.g. "P1-SP2-BL01"
+  voteCode         String
+  voteName         String
+  programName      String
+  subProgramName   String?
+  description      String
+  authorizedAmount Decimal @db.Decimal(18, 2)
+
+  allocation Allocation?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([budgetId, code])
+  @@map("budget_lines")
+}
+
+enum AllocationStatus {
+  ACTIVE
+  FROZEN
+  CLOSED
+}
+
+// The "Digital Budget Entitlement" of section 10 — created exactly once per
+// BudgetLine, the moment its owning Budget is approved. `authorizedAmount`
+// starts as a copy of the BudgetLine's authorized amount and can only change
+// afterward through an approved BudgetAdjustment (never edited directly).
+model Allocation {
+  id           String     @id @default(uuid())
+  budgetLineId String     @unique
+  budgetLine   BudgetLine @relation(fields: [budgetLineId], references: [id], onDelete: Restrict)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  fiscalYearId   String
+
+  // authorized = ceiling. committed = sum of ACTIVE commitments (earmarked,
+  // not yet spent). spent = sum of expenditures already recorded. Available
+  // (computed, never stored) = authorized - committed - spent. A DB CHECK
+  // constraint (added via raw SQL in this phase's migration) backstops
+  // `committed + spent <= authorized` as defense in depth alongside the
+  // application-level row-locked check in BudgetService.
+  authorizedAmount Decimal          @db.Decimal(18, 2)
+  committedAmount  Decimal          @default(0) @db.Decimal(18, 2)
+  spentAmount      Decimal          @default(0) @db.Decimal(18, 2)
+  status           AllocationStatus @default(ACTIVE)
+
+  authorizationReference String @unique
+
+  // Schema-ready for the same pattern as AuditEvent.blockchainTxRef, but NOT
+  // yet populated by anything in Phase 5: the ALLOCATION_CREATED audit event
+  // for this allocation does get anchored (audit_events.blockchainTxRef is
+  // set), but nothing currently copies that reference back onto the
+  // Allocation row itself. Left as an honest gap rather than wired up
+  // speculatively — the audit event is already the source of truth for "was
+  // this allocation's creation anchored", so this field only matters once a
+  // consumer actually needs to query allocations by anchor status directly.
+  blockchainTxRef String?
+
+  commitments         Commitment[]
+  adjustments         BudgetAdjustment[]
+  procurementRequests ProcurementRequest[]
+  contracts           Contract[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([fiscalYearId])
+  @@map("allocations")
+}
+
+enum CommitmentStatus {
+  ACTIVE
+  RELEASED
+  CONSUMED
+}
+
+model Commitment {
+  id           String     @id @default(uuid())
+  allocationId String
+  allocation   Allocation @relation(fields: [allocationId], references: [id], onDelete: Restrict)
+
+  amount      Decimal          @db.Decimal(18, 2)
+  description String
+  status      CommitmentStatus @default(ACTIVE)
+
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  expenditure        Expenditure?
+  procurementRequest ProcurementRequest?
+  contracts          Contract[]
+
+  releasedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([allocationId])
+  @@map("commitments")
+}
+
+model Expenditure {
+  id           String     @id @default(uuid())
+  commitmentId String     @unique
+  commitment   Commitment @relation(fields: [commitmentId], references: [id], onDelete: Restrict)
+  allocationId String
+
+  amount      Decimal @db.Decimal(18, 2)
+  description String
+
+  recordedById String?
+  recordedBy   User?   @relation(fields: [recordedById], references: [id], onDelete: SetNull)
+
+  payment Payment?
+
+  createdAt DateTime @default(now())
+
+  @@index([allocationId])
+  @@map("expenditures")
+}
+
+enum BudgetAdjustmentType {
+  INCREASE
+  DECREASE
+}
+
+enum BudgetAdjustmentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model BudgetAdjustment {
+  id           String     @id @default(uuid())
+  allocationId String
+  allocation   Allocation @relation(fields: [allocationId], references: [id], onDelete: Restrict)
+
+  type   BudgetAdjustmentType
+  amount Decimal              @db.Decimal(18, 2)
+  reason String
+
+  status BudgetAdjustmentStatus @default(PENDING)
+
+  requestedById String?
+  requestedBy   User?   @relation("AdjustmentRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+
+  approvedById String?
+  approvedBy   User?     @relation("AdjustmentApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([allocationId])
+  @@map("budget_adjustments")
+}
+
+// ---------------------------------------------------------------------------
+// Procurement (Phase 6, section 11) — bounded to
+// Plan → Request → Tender → Lots → Bids → Evaluation → Award. Contract,
+// Purchase Order, delivery, inspection, invoice, and payment (the rest of
+// section 11's narrative lifecycle) are explicitly Phase 9/10 scope, per the
+// table ownership DATABASE.md has documented since Phase 0 — an
+// awarded bid is where this phase's responsibility ends.
+//
+// Scope decision: `Supplier` here is intentionally minimal (identity fields
+// only) — just enough for a Bid to reference who submitted it. Phase 7
+// (Supplier Management) extends this same table with ownership, documents,
+// compliance, and risk-profile data via a follow-up migration, rather than
+// introducing a second supplier concept.
+// ---------------------------------------------------------------------------
+
+enum SupplierStatus {
+  ACTIVE
+  SUSPENDED
+  BLACKLISTED
+}
+
+enum SupplierBusinessType {
+  SOLE_PROPRIETORSHIP
+  PARTNERSHIP
+  LIMITED_COMPANY
+  COOPERATIVE
+  NGO
+  OTHER
+}
+
+// Phase 6 created this table with just enough fields for a Bid to reference
+// who submitted it. Phase 7 (Supplier Management) extends the SAME table
+// with the profile/compliance fields below, plus three new child tables
+// (owners, documents, risk profiles) — a deliberate choice to have one
+// supplier concept that grows over time, not a second "full" supplier
+// entity duplicating the first.
+model Supplier {
+  id                 String                @id @default(uuid())
+  name               String
+  registrationNumber String                @unique
+  email              String?
+  phone              String?
+  status             SupplierStatus        @default(ACTIVE)
+  businessType       SupplierBusinessType?
+  taxIdentifier      String?
+  physicalAddress    String?
+  county             String?
+  contactPersonName  String?
+
+  bids         Bid[]
+  owners       SupplierOwner[]
+  documents    SupplierDocument[]
+  riskProfiles SupplierRiskProfile[]
+  contracts    Contract[]
+  invoices     Invoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("suppliers")
+}
+
+// Beneficial ownership disclosure (section 12) — the `isPoliticallyExposedPerson`
+// flag is the specific anti-corruption-relevant field here: a supplier owned or
+// controlled by a politically exposed person is a recognized conflict-of-interest
+// signal that procurement/audit actors need visibility into, distinct from
+// ordinary ownership bookkeeping.
+model SupplierOwner {
+  id         String   @id @default(uuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  fullName                   String
+  nationalIdOrPassport       String
+  ownershipPercentage        Decimal @db.Decimal(5, 2)
+  position                   String?
+  isPoliticallyExposedPerson Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([supplierId])
+  @@map("supplier_owners")
+}
+
+enum SupplierDocumentType {
+  REGISTRATION_CERTIFICATE
+  TAX_COMPLIANCE_CERTIFICATE
+  CR12
+  PIN_CERTIFICATE
+  OTHER
+}
+
+enum SupplierDocumentStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+// Only the document's SHA-256 hash and metadata are persisted — no object
+// storage backend exists yet (see ARCHITECTURE.md § Blockchain vs. Database
+// for the intended "hash on record, bytes in encrypted object storage"
+// pattern; Phase 10's evidence vault is where real storage gets wired up).
+// The hash is computed server-side from the submitted content, not trusted
+// from the client, so it can't be spoofed at upload time.
+model SupplierDocument {
+  id         String   @id @default(uuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  documentType  SupplierDocumentType
+  fileName      String
+  fileHash      String
+  fileSizeBytes Int
+  mimeType      String
+  status        SupplierDocumentStatus @default(PENDING)
+  expiryDate    DateTime?
+
+  uploadedById    String?
+  uploadedBy      User?     @relation("SupplierDocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  verifiedById    String?
+  verifiedBy      User?     @relation("SupplierDocumentVerifiedBy", fields: [verifiedById], references: [id], onDelete: SetNull)
+  verifiedAt      DateTime?
+  rejectionReason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([supplierId])
+  @@map("supplier_documents")
+}
+
+enum SupplierRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// Manual risk assessments only for now — append-only history (never updated
+// in place; "current" risk is simply the most recent row for the supplier).
+// Phase 8 (AI Risk Engine) is where automated detectors start writing these
+// same rows; this table's shape is deliberately detector-agnostic (a plain
+// `factors` JSON bag) so Phase 8 doesn't need a schema change to start
+// populating it.
+model SupplierRiskProfile {
+  id         String   @id @default(uuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  riskLevel SupplierRiskLevel
+  score     Decimal           @db.Decimal(5, 2)
+  factors   Json
+  notes     String?
+
+  assessedById String?
+  assessedBy   User?    @relation("SupplierRiskAssessedBy", fields: [assessedById], references: [id], onDelete: SetNull)
+  assessedAt   DateTime @default(now())
+
+  @@index([supplierId])
+  @@map("supplier_risk_profiles")
+}
+
+enum ProcurementPlanStatus {
+  DRAFT
+  APPROVED
+}
+
+model ProcurementPlan {
+  id             String                @id @default(uuid())
+  organizationId String
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  fiscalYearId   String
+  fiscalYear     FiscalYear            @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+  name           String
+  description    String?
+  status         ProcurementPlanStatus @default(DRAFT)
+
+  createdById  String?
+  createdBy    User?     @relation("ProcurementPlanCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedById String?
+  approvedBy   User?     @relation("ProcurementPlanApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  requests ProcurementRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, fiscalYearId, name])
+  @@map("procurement_plans")
+}
+
+enum ProcurementRequestStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+// Approving a request is the Budget↔Procurement integration point (section
+// 9's "Allocation → Commitment → Procurement"): it creates a real
+// `Commitment` against the referenced `Allocation`, reusing Phase 5's
+// row-locked AllocationsService rather than duplicating that safety logic.
+model ProcurementRequest {
+  id                String          @id @default(uuid())
+  procurementPlanId String
+  procurementPlan   ProcurementPlan @relation(fields: [procurementPlanId], references: [id], onDelete: Restrict)
+  organizationId    String
+  organization      Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  allocationId      String
+  allocation        Allocation      @relation(fields: [allocationId], references: [id], onDelete: Restrict)
+
+  title           String
+  description     String
+  estimatedAmount Decimal                  @db.Decimal(18, 2)
+  status          ProcurementRequestStatus @default(DRAFT)
+
+  commitmentId String?     @unique
+  commitment   Commitment? @relation(fields: [commitmentId], references: [id], onDelete: SetNull)
+
+  requestedById String?
+  requestedBy   User?     @relation("ProcurementRequestRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  approvedById  String?
+  approvedBy    User?     @relation("ProcurementRequestApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt    DateTime?
+  rejectedAt    DateTime?
+
+  tenders Tender[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([procurementPlanId])
+  @@index([allocationId])
+  @@map("procurement_requests")
+}
+
+enum TenderStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  AWARDED
+  CANCELLED
+}
+
+model Tender {
+  id                   String             @id @default(uuid())
+  procurementRequestId String
+  procurementRequest   ProcurementRequest @relation(fields: [procurementRequestId], references: [id], onDelete: Restrict)
+
+  tenderNumber String       @unique
+  title        String
+  description  String
+  status       TenderStatus @default(DRAFT)
+
+  publishedAt DateTime?
+  closingDate DateTime
+  closedAt    DateTime?
+
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  lots TenderLot[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tenders")
+}
+
+model TenderLot {
+  id       String @id @default(uuid())
+  tenderId String
+  tender   Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  lotNumber       String
+  description     String
+  estimatedAmount Decimal @db.Decimal(18, 2)
+
+  bids  Bid[]
+  award Award?
+
+  createdAt DateTime @default(now())
+
+  @@unique([tenderId, lotNumber])
+  @@map("tender_lots")
+}
+
+enum BidStatus {
+  SUBMITTED
+  EVALUATED
+  AWARDED
+  REJECTED
+}
+
+model Bid {
+  id          String    @id @default(uuid())
+  tenderLotId String
+  tenderLot   TenderLot @relation(fields: [tenderLotId], references: [id], onDelete: Restrict)
+  supplierId  String
+  supplier    Supplier  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+
+  amount Decimal   @db.Decimal(18, 2)
+  status BidStatus @default(SUBMITTED)
+
+  technicalScore Decimal? @db.Decimal(5, 2)
+  financialScore Decimal? @db.Decimal(5, 2)
+
+  submittedById String?
+  submittedBy   User?   @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+
+  evaluations BidEvaluation[]
+  award       Award?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenderLotId, supplierId])
+  @@index([tenderLotId])
+  @@map("bids")
+}
+
+model BidEvaluation {
+  id    String @id @default(uuid())
+  bidId String
+  bid   Bid    @relation(fields: [bidId], references: [id], onDelete: Cascade)
+
+  technicalScore Decimal @db.Decimal(5, 2)
+  financialScore Decimal @db.Decimal(5, 2)
+  comments       String?
+
+  evaluatedById String?
+  evaluatedBy   User?   @relation(fields: [evaluatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([bidId])
+  @@map("bid_evaluations")
+}
+
+// One award per lot (the unique constraint on tenderLotId is what makes
+// "award this lot" safely create-once under concurrent requests — no row
+// lock needed, unlike Phase 5's running balances, because this is a
+// create-exactly-once operation, not a running total).
+model Award {
+  id          String    @id @default(uuid())
+  tenderLotId String    @unique
+  tenderLot   TenderLot @relation(fields: [tenderLotId], references: [id], onDelete: Restrict)
+  bidId       String    @unique
+  bid         Bid       @relation(fields: [bidId], references: [id], onDelete: Restrict)
+
+  awardedAmount Decimal @db.Decimal(18, 2)
+
+  awardedById String?
+  awardedBy   User?   @relation(fields: [awardedById], references: [id], onDelete: SetNull)
+
+  contract Contract?
+
+  createdAt DateTime @default(now())
+
+  @@map("awards")
+}
+
+// ---------------------------------------------------------------------------
+// AI Risk Engine (Phase 8, section 8/17)
+// ---------------------------------------------------------------------------
+
+enum RiskDetectorType {
+  PRICE_ANOMALY
+  BID_COLLUSION
+  SPLIT_PROCUREMENT
+  SUPPLIER_RISK
+}
+
+enum RiskAlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RiskAlertStatus {
+  OPEN
+  UNDER_REVIEW
+  CONFIRMED
+  DISMISSED
+}
+
+// Every detector is deterministic/statistical (thresholds, z-scores,
+// coefficient of variation) — there is no ML/LLM model in this phase, and
+// nothing here ever blocks the action that triggered it (see
+// RiskAlertsService — detectors can only ever additively raise an alert for
+// a human with `risk:review` to act on, never reject a request/bid/tender
+// transition themselves). `resourceType`/`resourceId` are a loose string
+// reference (not a foreign key), the same polymorphic-reference pattern
+// `AuditEvent` already uses, since an alert can point at a Bid, TenderLot,
+// ProcurementRequest, or Supplier.
+model RiskAlert {
+  id           String            @id @default(uuid())
+  detectorType RiskDetectorType
+  severity     RiskAlertSeverity
+  resourceType String
+  resourceId   String
+  title        String
+  description  String
+  evidence     Json
+  status       RiskAlertStatus   @default(OPEN)
+
+  reviewedById String?
+  reviewedBy   User?     @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt   DateTime?
+  reviewNotes  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([resourceType, resourceId])
+  @@index([status])
+  @@map("risk_alerts")
+}
+
+// ---------------------------------------------------------------------------
+// Contracts, Purchase Orders, Invoices & Payments (Phase 9, sections 9/18)
+// ---------------------------------------------------------------------------
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  TERMINATED
+}
+
+// One contract per Award. organizationId/allocationId/commitmentId/
+// supplierId are derived SERVER-SIDE from the award's own chain
+// (Award -> TenderLot -> Tender -> ProcurementRequest) at creation time,
+// never accepted as client input — a contract's budget line has to be
+// exactly what the awarded procurement's commitment says, not something a
+// caller could point at a different, unrelated allocation. Denormalized
+// here rather than re-walked on every read.
+//
+// `commitmentId` is deliberately NOT unique: a Tender can have multiple
+// TenderLots, each independently awarded and each getting its own
+// Contract, all tracing back to the same ProcurementRequest and therefore
+// the same Commitment. This does interact with Phase 5's existing
+// `Expenditure.commitmentId @unique` — only the FIRST Payment executed
+// against a shared commitment can create its Expenditure; a second
+// contract's payment sharing that commitment gets a clear 409, not a raw
+// constraint error (see PaymentsService.execute()). This is a consequence
+// of Phase 5's already-documented "one expenditure fully closes its
+// commitment, no partial tracking" scope boundary, not a new limitation
+// introduced here.
+model Contract {
+  id             String       @id @default(uuid())
+  awardId        String       @unique
+  award          Award        @relation(fields: [awardId], references: [id], onDelete: Restrict)
+  supplierId     String
+  supplier       Supplier     @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  allocationId   String
+  allocation     Allocation   @relation(fields: [allocationId], references: [id], onDelete: Restrict)
+  commitmentId   String
+  commitment     Commitment   @relation(fields: [commitmentId], references: [id], onDelete: Restrict)
+
+  contractNumber String         @unique
+  title          String
+  value          Decimal        @db.Decimal(18, 2)
+  startDate      DateTime
+  endDate        DateTime
+  status         ContractStatus @default(DRAFT)
+
+  createdById String?
+  createdBy   User?     @relation("ContractCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  signedById  String?
+  signedBy    User?     @relation("ContractSignedBy", fields: [signedById], references: [id], onDelete: SetNull)
+  signedAt    DateTime?
+
+  purchaseOrders PurchaseOrder[]
+  project        Project?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([supplierId])
+  @@index([organizationId])
+  @@map("contracts")
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  ISSUED
+  FULFILLED
+  CANCELLED
+}
+
+model PurchaseOrder {
+  id         String   @id @default(uuid())
+  contractId String
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+
+  poNumber    String              @unique
+  description String
+  amount      Decimal             @db.Decimal(18, 2)
+  status      PurchaseOrderStatus @default(DRAFT)
+
+  issuedById String?
+  issuedBy   User?     @relation(fields: [issuedById], references: [id], onDelete: SetNull)
+  issuedAt   DateTime?
+
+  invoices Invoice[]
+
+  createdAt DateTime @default(now())
+
+  @@index([contractId])
+  @@map("purchase_orders")
+}
+
+enum InvoiceStatus {
+  SUBMITTED
+  VERIFIED
+  REJECTED
+  PAID
+}
+
+// No supplier self-service portal exists yet (see schema.prisma comment on
+// Supplier / THREAT_MODEL.md Phase 7) — an invoice is recorded BY internal
+// staff (`submittedById`) on a supplier's behalf, not submitted by the
+// supplier's own login. An honest limitation, not an oversight.
+model Invoice {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  supplierId      String
+  supplier        Supplier      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+
+  invoiceNumber String        @unique
+  amount        Decimal       @db.Decimal(18, 2)
+  dueDate       DateTime?
+  status        InvoiceStatus @default(SUBMITTED)
+
+  items InvoiceItem[]
+
+  submittedById   String?
+  submittedBy     User?     @relation("InvoiceSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  verifiedById    String?
+  verifiedBy      User?     @relation("InvoiceVerifiedBy", fields: [verifiedById], references: [id], onDelete: SetNull)
+  verifiedAt      DateTime?
+  rejectionReason String?
+
+  paymentRequest PaymentRequest?
+
+  createdAt DateTime @default(now())
+
+  @@index([purchaseOrderId])
+  @@index([supplierId])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id        String  @id @default(uuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  description String
+  quantity    Decimal @db.Decimal(12, 2)
+  unitPrice   Decimal @db.Decimal(18, 2)
+  amount      Decimal @db.Decimal(18, 2)
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+enum PaymentRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXECUTED
+}
+
+// Multi-signature payment approval (section 18): auto-created the moment
+// its Invoice is verified (mirrors Phase 6's "approving a request
+// auto-creates a Commitment" pattern), and requires `requiredApprovals`
+// distinct PaymentApproval rows with decision APPROVE before execution is
+// allowed. Any single REJECT rejects it immediately — one reviewer can stop
+// a bad payment; no single reviewer can push one through alone. See
+// PaymentsService for the row-locked approval-count check that keeps this
+// safe under concurrent approvals (a running-tally problem, same shape as
+// Phase 5's allocation balances — not a "create once" or "chain append"
+// problem, so a row lock, not a unique constraint or advisory lock, is the
+// right tool here; see DATABASE.md § 4 Conventions).
+model PaymentRequest {
+  id        String  @id @default(uuid())
+  invoiceId String  @unique
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  amount            Decimal              @db.Decimal(18, 2)
+  requiredApprovals Int                  @default(2)
+  status            PaymentRequestStatus @default(PENDING)
+
+  approvals PaymentApproval[]
+  payment   Payment?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("payment_requests")
+}
+
+enum PaymentApprovalDecision {
+  APPROVE
+  REJECT
+}
+
+model PaymentApproval {
+  id               String         @id @default(uuid())
+  paymentRequestId String
+  paymentRequest   PaymentRequest @relation(fields: [paymentRequestId], references: [id], onDelete: Cascade)
+
+  approvedById String
+  approvedBy   User                    @relation(fields: [approvedById], references: [id], onDelete: Restrict)
+  decision     PaymentApprovalDecision
+  notes        String?
+
+  createdAt DateTime @default(now())
+
+  // The DB itself guarantees "no double approval by the same person" —
+  // the same create-exactly-once pattern Phase 6 used for Award, not a
+  // lock (see DATABASE.md § 4 Conventions).
+  @@unique([paymentRequestId, approvedById])
+  @@map("payment_approvals")
+}
+
+// Created only once a PaymentRequest reaches APPROVED and its execution
+// endpoint is actually called — this is where `Idempotency-Key` support
+// (deferred to exactly this phase, see SECURITY.md § Idempotency &
+// Concurrency) is implemented, via a two-phase claim-then-work sequence:
+// PaymentsService.execute() first INSERTs this row (expenditureId still
+// null) — the unique constraint on `idempotencyKey` is what atomically
+// arbitrates "which concurrent request gets to proceed", the same
+// create-exactly-once pattern Phase 6 used for Award, just applied before
+// the real work instead of after. Only the request that wins that insert
+// goes on to call AllocationsService.createExpenditure() (the real
+// trigger, at last, for a budget Expenditure sourced from procurement —
+// see schema.prisma comment on Contract for the one Phase 5 interaction
+// this has) and then fills in `expenditureId`. A losing concurrent
+// request (or a genuine client retry) hits the unique-constraint conflict
+// immediately, before touching the budget at all, and is simply handed
+// back this same row. If the work step fails after the claim succeeds,
+// the row is deleted so the idempotency key isn't permanently poisoned —
+// see PaymentsService.execute().
+model Payment {
+  id               String         @id @default(uuid())
+  paymentRequestId String         @unique
+  paymentRequest   PaymentRequest @relation(fields: [paymentRequestId], references: [id], onDelete: Restrict)
+  expenditureId    String?        @unique
+  expenditure      Expenditure?   @relation(fields: [expenditureId], references: [id], onDelete: Restrict)
+
+  amount         Decimal @db.Decimal(18, 2)
+  idempotencyKey String  @unique
+  reference      String  @unique
+
+  executedById String?
+  executedBy   User?    @relation(fields: [executedById], references: [id], onDelete: SetNull)
+  executedAt   DateTime @default(now())
+
+  reconciliations PaymentReconciliation[]
+
+  @@map("payments")
+}
+
+enum ReconciliationStatus {
+  MATCHED
+  DISCREPANCY
+}
+
+// A manual reconciliation record (no real bank-feed integration exists —
+// same honest scope boundary as "no real Neon credentials supplied" /
+// "no object storage backend" elsewhere in this project): a human matches
+// a Payment against an external statement/reference and records the
+// outcome, rather than an automated feed doing it.
+model PaymentReconciliation {
+  id        String  @id @default(uuid())
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  externalReference String
+  status            ReconciliationStatus
+  notes             String?
+
+  reconciledById String?
+  reconciledBy   User?   @relation(fields: [reconciledById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([paymentId])
+  @@map("payment_reconciliations")
+}
+
+// ---------------------------------------------------------------------------
+// Project Verification & Evidence Vault (Phase 10, sections 10/40)
+// ---------------------------------------------------------------------------
+
+enum ProjectStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  SUSPENDED
+  CANCELLED
+}
+
+// One project per Contract. `organizationId` is derived server-side from the
+// contract, the same anti-tampering judgment Phase 9 made for Contract's own
+// fields (never accepted as client input) — see ProjectsService.create().
+model Project {
+  id             String       @id @default(uuid())
+  contractId     String       @unique
+  contract       Contract     @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  name           String
+  description    String
+  location       String?
+  status         ProjectStatus @default(PLANNED)
+  startDate      DateTime
+  plannedEndDate DateTime
+  actualEndDate  DateTime?
+
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  milestones Milestone[]
+  evidence   ProjectEvidence[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@map("projects")
+}
+
+enum MilestoneStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  VERIFIED
+}
+
+// PENDING → IN_PROGRESS → COMPLETED (site work done, awaiting verification)
+// → VERIFIED (a PASSED Inspection confirms it — see InspectionsService). A
+// FAILED/NEEDS_REVISION inspection sends a COMPLETED milestone back to
+// IN_PROGRESS rather than leaving it stuck — rework is expected to happen,
+// not just be recorded as a dead end.
+model Milestone {
+  id        String  @id @default(uuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  sequenceNumber Int
+  title          String
+  description    String
+  plannedAmount  Decimal         @db.Decimal(18, 2)
+  plannedDate    DateTime
+  status         MilestoneStatus @default(PENDING)
+  completedAt    DateTime?
+
+  inspections Inspection[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, sequenceNumber])
+  @@map("milestones")
+}
+
+enum InspectionOutcome {
+  PASSED
+  FAILED
+  NEEDS_REVISION
+}
+
+// Deliberately no permission lets the same actor both mark a milestone
+// COMPLETED and record its inspection — `milestone:manage` (Project
+// Manager) and `project:inspect` (Engineer) are different permissions
+// granted to different roles in seed.ts, the same separation-of-duties
+// judgment already applied to Phase 6 (evaluate vs award), Phase 9 (submit
+// vs verify, approve vs execute), and Phase 8 (risk:review withheld from
+// Procurement Officer).
+model Inspection {
+  id          String    @id @default(uuid())
+  milestoneId String
+  milestone   Milestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+
+  inspectedById String?
+  inspectedBy   User?             @relation(fields: [inspectedById], references: [id], onDelete: SetNull)
+  inspectedAt   DateTime          @default(now())
+  outcome       InspectionOutcome
+  findings      String
+
+  evidence ProjectEvidence[]
+
+  @@index([milestoneId])
+  @@map("inspections")
+}
+
+// The evidence vault (section 40): unlike Phase 7's supplier documents
+// (hash + metadata ONLY, no object storage backend existed yet), this is
+// the first phase where the actual file bytes are stored — AES-256-GCM
+// encrypted at rest via a real `ObjectStorageAdapter`
+// (`packages/storage`/`apps/api/src/modules/storage`), retrievable, and
+// hash-verified on every read (a mismatch between the stored hash and the
+// decrypted content's freshly-computed hash means the stored bytes were
+// tampered with or corrupted — see EvidenceService.download()).
+// `blockchainTxRef` anchors `fileHash` directly via the same
+// `BlockchainAdapter` Phase 4 built, immediately at upload time rather than
+// waiting for AuditService's periodic rollup — each piece of evidence is
+// independently significant enough to anchor on its own.
+model ProjectEvidence {
+  id           String      @id @default(uuid())
+  projectId    String
+  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  inspectionId String?
+  inspection   Inspection? @relation(fields: [inspectionId], references: [id], onDelete: SetNull)
+
+  fileName        String
+  fileHash        String
+  fileSizeBytes   Int
+  mimeType        String
+  storageKey      String  @unique
+  blockchainTxRef String?
+
+  uploadedById String?
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([inspectionId])
+  @@map("project_evidence")
+}
+
+// ---------------------------------------------------------------------------
+// Whistleblower Portal (Phase 13, section 12/40) — anonymous by design. No
+// required identity anywhere in this chain: submitting a report, adding
+// evidence, and replying to an investigator's question are all reachable
+// with no session, no User row, no FK to one. Access after submission is a
+// possession-based secret (`trackingCodeHash`) rather than a login — the
+// exact "never persist the secret itself, only its hash" discipline Phase 2
+// already established for refresh tokens and MFA backup codes (see
+// SECURITY.md § Identity & Authentication) — the raw tracking code is
+// returned to the reporter exactly once, in the submission response, and is
+// never recoverable again if lost (the same "shown once" guarantee as an
+// API key or backup code).
+//
+// Deliberately the narrowest read access of any table in the schema:
+// `whistleblower:read`/`investigate` are granted ONLY to Auditor/Internal
+// Auditor in seed.ts — not even Super Administrator's blanket grant is
+// treated as a reason to skip thinking about this specifically, since a
+// report may well be about the conduct of someone holding another
+// permission entirely. See THREAT_MODEL.md Phase 13 for the full account of
+// why this is the single most sensitive table in the system.
+// ---------------------------------------------------------------------------
+
+enum ReportCategory {
+  CORRUPTION
+  FRAUD
+  PROCUREMENT_IRREGULARITY
+  CONFLICT_OF_INTEREST
+  ABUSE_OF_OFFICE
+  OTHER
+}
+
+enum ReportStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  SUBSTANTIATED
+  UNSUBSTANTIATED
+}
+
+model Report {
+  id               String @id @default(uuid())
+  trackingCodeHash String @unique
+
+  category       ReportCategory
+  description    String
+  organizationId String?
+  organization   Organization?  @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  status         ReportStatus   @default(SUBMITTED)
+
+  // AES-256-GCM ciphertext (packages/crypto `encrypt()`) of an optional
+  // contact email/phone the reporter may choose to leave — the one field in
+  // this entire module that could actually identify someone, so it gets its
+  // own dedicated encryption key (WHISTLEBLOWER_CONTACT_ENCRYPTION_KEY),
+  // deliberately not reused from MFA_ENCRYPTION_KEY or
+  // EVIDENCE_ENCRYPTION_KEY — key separation per purpose, not convenience.
+  contactEncrypted String?
+
+  assignedToId String?
+  assignedTo   User?   @relation("WhistleblowerReportAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  evidence ReportEvidence[]
+  updates  ReportUpdate[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([organizationId])
+  @@map("whistleblower_reports")
+}
+
+// Real encrypted object storage, the same `ObjectStorageAdapter` pattern
+// Phase 10 built (not another hash-only placeholder) — a report's evidence
+// is exactly as sensitive as its description, so it gets the same rigor.
+// `uploadedById` is deliberately absent (unlike `ProjectEvidence`) — there
+// is no authenticated uploader to record, ever, for this table.
+model ReportEvidence {
+  id       String @id @default(uuid())
+  reportId String
+  report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  fileName        String
+  fileHash        String
+  fileSizeBytes   Int
+  mimeType        String
+  storageKey      String  @unique
+  blockchainTxRef String?
+
+  createdAt DateTime @default(now())
+
+  @@index([reportId])
+  @@map("whistleblower_evidence")
+}
+
+enum ReportUpdateAuthor {
+  INVESTIGATOR
+  REPORTER
+}
+
+// Two-way anonymous communication — the actual "investigator workflow" this
+// phase's own roadmap entry calls for, not just a one-way status flag. An
+// investigator's question and a reporter's reply live in the same
+// chronological list; `postedById` is set only when `author = INVESTIGATOR`
+// (a `REPORTER` update has no actor to attribute, by design).
+model ReportUpdate {
+  id       String @id @default(uuid())
+  reportId String
+  report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  author  ReportUpdateAuthor
+  message String
+
+  postedById String?
+  postedBy   User?   @relation(fields: [postedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([reportId])
+  @@map("whistleblower_report_updates")
+}

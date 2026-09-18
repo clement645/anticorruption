@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Section 35 (CI/CD): PR -> lint -> typecheck/build -> unit tests -> e2e
+# tests, with the workflow itself failing (blocking merge, if configured as
+# a required check) on any failing step. Deploy is intentionally NOT wired
+# up here yet — see DEPLOYMENT.md § CI/CD for why a deploy step needs a real
+# target environment's secrets before it can be added responsibly.
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    # A real, ephemeral PostgreSQL 16 instance — the same version and image
+    # family used for local development throughout this project (see
+    # DEPLOYMENT.md § Local Development) — not a mock. Torn down with the
+    # job; no data persists between runs.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bpfmps
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: development
+      PORT: 3000
+      API_PREFIX: api/v1
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bpfmps?schema=public
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bpfmps?schema=public
+      CORS_ORIGIN: http://localhost:5173
+      RATE_LIMIT_TTL: 60
+      RATE_LIMIT_MAX: 1000
+      LOG_LEVEL: warn
+      JWT_ACCESS_TOKEN_TTL_SECONDS: 900
+      REFRESH_TOKEN_TTL_DAYS: 7
+      ACCOUNT_LOCKOUT_THRESHOLD: 5
+      ACCOUNT_LOCKOUT_DURATION_MINUTES: 15
+      AUDIT_SIGNING_KEY_ID: ci-key-1
+      BLOCKCHAIN_ADAPTER: development
+      BLOCKCHAIN_ANCHOR_INTERVAL_SECONDS: 60
+      BLOCKCHAIN_ANCHOR_BATCH_SIZE: 100
+      RISK_SPLIT_PROCUREMENT_THRESHOLD: 1000000
+      RISK_SPLIT_PROCUREMENT_WINDOW_DAYS: 30
+      RISK_SPLIT_PROCUREMENT_MIN_COUNT: 3
+      OBJECT_STORAGE_ADAPTER: filesystem
+      EVIDENCE_STORAGE_PATH: ./storage/evidence
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Every secret-shaped env var here is generated fresh for this one CI
+      # run and discarded with the runner — never a repo secret, never
+      # reused across runs, never the same value as any real environment.
+      # There is nothing sensitive to protect: the database is a throwaway
+      # container seeded with clearly-labeled DEMO/TEST data only (section
+      # 47) and destroyed at the end of the job.
+      - name: Generate ephemeral CI-only secrets
+        run: |
+          node -e "
+            const crypto = require('node:crypto');
+            const fs = require('node:fs');
+            const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+            const privPem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+            const pubPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+            const out = [
+              'JWT_SECRET=' + crypto.randomBytes(48).toString('base64'),
+              'MFA_ENCRYPTION_KEY=' + crypto.randomBytes(32).toString('base64'),
+              'EVIDENCE_ENCRYPTION_KEY=' + crypto.randomBytes(32).toString('base64'),
+              'WHISTLEBLOWER_CONTACT_ENCRYPTION_KEY=' + crypto.randomBytes(32).toString('base64'),
+              'AUDIT_SIGNING_PRIVATE_KEY=' + Buffer.from(privPem).toString('base64'),
+              'AUDIT_SIGNING_PUBLIC_KEY=' + Buffer.from(pubPem).toString('base64'),
+            ].join('\n') + '\n';
+            fs.appendFileSync(process.env.GITHUB_ENV, out);
+          "
+
+      - name: Build packages/crypto
+        run: npm run build:crypto
+      - name: Build packages/blockchain
+        run: npm run build:blockchain
+      - name: Build packages/storage
+        run: npm run build:storage
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+      - name: Apply migrations
+        run: npm run prisma:migrate:deploy
+      - name: Seed demo/test data
+        run: npm run prisma:seed
+
+      - name: Lint (api + web)
+        run: npm run lint
+
+      - name: Build (api + web)
+        run: npm run build
+
+      - name: e2e tests (apps/api)
+        run: npm run test:e2e --workspace=apps/api

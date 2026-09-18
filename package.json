@@ -1,0 +1,45 @@
+{
+  "name": "bp-fpmps",
+  "version": "0.1.0",
+  "private": true,
+  "description": "B-PFMPS: Blockchain-Based Integrated Public Financial Management & Procurement System",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run start:dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build": "npm run build:crypto && npm run build:blockchain && npm run build:storage && npm run build:database && npm run build:api && npm run build:web",
+    "build:crypto": "npm run build --workspace=packages/crypto",
+    "build:blockchain": "npm run build --workspace=packages/blockchain",
+    "build:storage": "npm run build --workspace=packages/storage",
+    "build:database": "npm run build --workspace=packages/database",
+    "build:api": "npm run build --workspace=apps/api",
+    "build:web": "npm run build --workspace=apps/web",
+    "test": "npm run test --workspace=apps/api && npm run test --workspace=apps/web",
+    "lint": "npm run lint --workspace=apps/api && npm run lint --workspace=apps/web",
+    "prisma:generate": "npm run prisma:generate --workspace=packages/database",
+    "prisma:migrate": "npm run prisma:migrate --workspace=packages/database",
+    "prisma:migrate:deploy": "npm run prisma:migrate:deploy --workspace=packages/database",
+    "prisma:seed": "npm run prisma:seed --workspace=packages/database"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "UNLICENSED",
+  "overrides": {
+    "multer": "^2.4.0",
+    "deepmerge-ts": "^8.0.2"
+  },
+  "allowScripts": {
+    "@parcel/watcher@2.6.0": true,
+    "unrs-resolver@1.12.2": true,
+    "@scarf/scarf": false,
+    "@prisma/client@6.19.3": true,
+    "prisma@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "argon2@0.45.1": true,
+    "esbuild@0.28.2": true
+  }
+}
