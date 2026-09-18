@@ -1136,30 +1136,38 @@ lack of exactly this.
   for reconstructing *history* distinct from Neon's backup of *current state*. No
   actual recovery drill has been performed against the real Neon project yet —
   named explicitly as residual risk rather than left implicit.
-- **CI/CD**: a real GitHub Actions workflow now exists
+- **CI/CD**: a real GitHub Actions workflow exists
   (`.github/workflows/ci.yml`) — checkout → install → build every package →
   generate the Prisma client → migrate → seed → lint → build → the full e2e suite,
   against a genuine ephemeral PostgreSQL 16 service container, on every push/PR to
   `main`/`master`. Every secret-shaped value the pipeline needs is generated fresh
   per run and discarded with it — never a stored repository secret, since nothing
-  in a throwaway CI database needs to persist or be protected. Every individual
-  command in the workflow was verified to work correctly by running it locally
-  first; the workflow file itself has not yet been executed by GitHub Actions,
-  since that requires the repository to actually exist on GitHub (see below).
+  in a throwaway CI database needs to persist or be protected. **Actually run on
+  GitHub Actions for real, not just locally simulated** — the repository was
+  pushed specifically to confirm this (see below). The first real run failed,
+  catching a genuine gap that only running it for real (against a truly clean
+  checkout) could surface: `packages/database` was never compiled before lint ran,
+  so every file importing `@bpfmps/database` hit cascading
+  `@typescript-eslint/no-unsafe-*` errors — local testing had masked this because
+  the package was always already built from earlier work in the same session.
+  Fixed with one added build step; the second run passed end to end (all 18 steps
+  green, ~2 minutes, full e2e suite included).
 - **Neon connectivity**: real pooled and direct Neon connection strings were
   supplied this session and dropped into `apps/api/.env` with zero code changes
   needed, confirming the "just a connection-string swap" design claim made since
   Phase 1. **Schema deployment against the real Neon project
   (`prisma migrate deploy`) was attempted and blocked by this environment's own
   safety tooling as a "production deploy" action** — a reasonable guardrail this
-  agent did not attempt to work around. This is left as a pending, explicit
-  action for a human to run (see DEPLOYMENT.md § Local Development for the exact
-  command), not silently skipped or worked around through another channel.
+  agent did not attempt to work around. Presented to the user as an explicit
+  choice; the user chose to run it themselves rather than have this agent granted
+  permission to do so (see DEPLOYMENT.md § Local Development for the exact
+  command) — `apps/api/.env` was restored to local Postgres immediately and
+  remains that way.
 - **GitHub repository**: `https://github.com/clement645/anticorruption` was
-  supplied this session. The local working tree (14 phases, zero prior commits)
-  has not yet been pushed there — treated as a deliberate, explicitly-confirmed
-  action given it is this project's first-ever publish to a real, shared remote,
-  not something to do automatically alongside everything else in this pass.
+  supplied this session. Presented to the user as an explicit choice (first-ever
+  publish to a real, shared remote for this project); the user confirmed, and the
+  full 14-phase working tree was committed and pushed — see above for what
+  happened when the resulting CI run actually executed.
 
 **Notable engineering decisions:**
 - **Fix the root cause, don't just document around it — applied to `npm audit`
@@ -1318,30 +1326,40 @@ full, detailed account of everything above.
     scoped per-route; no actual Neon backup/DR recovery drill has been
     performed, only the mechanism documented; load testing covered read-heavy
     endpoints at moderate concurrency for short durations only, not a sustained
-    write-heavy or high-concurrency test, and not against real Neon; the CI
-    workflow has not yet been executed by GitHub Actions itself; schema has not
-    yet been deployed to the real Neon project; and the repository has not yet
-    been pushed to GitHub — see "Next Steps" below for the last two).
+    write-heavy or high-concurrency test, and not against real Neon; schema has
+    not yet been deployed to the real Neon project, left as an explicit pending
+    action for a human to run — see "Next Steps" below). The repository is now
+    pushed and CI has actually run on GitHub Actions (not just locally
+    simulated) — its first real run caught and this phase fixed a genuine gap
+    (see "Notable engineering decisions" above), which is itself evidence for
+    why "written and locally verified" and "actually run for real" are
+    different claims worth keeping distinct in this document going forward.
 
 ## Next Steps
 
-All 14 phases of the original roadmap are now complete. What remains is not new
-implementation work but finishing the two external connections Phase 14 brought
-into reach and deliberately left as explicit human actions rather than
-unilateral agent actions:
+All 14 phases of the original roadmap are now complete. Of the two external
+connections Phase 14 brought into reach, one is done and one remains an
+explicit, pending human action:
 
-1. **Deploy the schema to the real Neon project.** With `DATABASE_URL`/
-   `DIRECT_DATABASE_URL` in `apps/api/.env` pointed at the real Neon connection
-   strings (already confirmed to work as a pure swap, see DEPLOYMENT.md §
-   Local Development), run `npm run prisma:migrate:deploy` from the repo root,
-   then `npm run prisma:seed`.
-2. **Push this repository to GitHub** (`https://github.com/clement645/
-   anticorruption`) and confirm the new CI workflow
-   (`.github/workflows/ci.yml`) runs and passes there — the one piece of this
-   phase's own work that could only be verified locally, not through the real
-   GitHub Actions runner, until the repository exists there.
+1. **Repository pushed and CI verified — done.** The full 14-phase working tree
+   was committed and pushed to `https://github.com/clement645/anticorruption`
+   with the user's explicit confirmation. The CI workflow
+   (`.github/workflows/ci.yml`) has genuinely run on GitHub Actions: its first
+   real run failed (catching a real `packages/database` build-ordering gap —
+   see "Notable engineering decisions" above), and after a one-line fix, the
+   second run passed end to end.
+2. **Deploy the schema to the real Neon project — still pending.** Schema
+   deployment (`prisma migrate deploy`) against the real Neon project was
+   attempted and blocked by this environment's own safety tooling as a
+   production-deploy action; presented to the user as an explicit choice, and
+   the user chose to run it themselves rather than grant this agent permission
+   to do so. With `DATABASE_URL`/`DIRECT_DATABASE_URL` in `apps/api/.env`
+   pointed at the real Neon connection strings (already confirmed to work as a
+   pure swap, see DEPLOYMENT.md § Local Development), run
+   `npm run prisma:migrate:deploy` from the repo root, then
+   `npm run prisma:seed`.
 
-Beyond those two, further work is genuinely optional hardening/extension rather
+Beyond that, further work is genuinely optional hardening/extension rather
 than anything the original spec calls for: the residual risks named throughout
 this document and in SECURITY.md/THREAT_MODEL.md (cross-resource case views,
 retention policies, step-up authentication, a real Neon recovery drill,

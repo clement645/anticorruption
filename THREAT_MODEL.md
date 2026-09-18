@@ -1231,8 +1231,11 @@ with no flakiness.
    (where network latency and the pooler's own behavior would change the
    numbers).
 5. **Not yet addressed, and deliberately left for explicit human action rather
-   than done unilaterally:** schema deployment against the real Neon project
-   (blocked by this environment's own safety tooling as a production-deploy
-   action, not attempted through another channel), and pushing this
-   repository to GitHub for the first time (a first-ever publish to a real,
-   shared remote — see IMPLEMENTATION_PLAN.md "Next Steps").
+   than done unilaterally:** schema deployment against the real Neon project —
+   blocked by this environment's own safety tooling as a production-deploy
+   action, presented to the user as an explicit choice, and the user chose to
+   run it themselves (see IMPLEMENTATION_PLAN.md "Next Steps" for the exact
+   command). The repository has since been pushed to GitHub with the user's
+   explicit confirmation, and the CI workflow has genuinely run there — see
+   "Notable engineering decisions" in IMPLEMENTATION_PLAN.md Phase 14 for the
+   real bug that first run caught.

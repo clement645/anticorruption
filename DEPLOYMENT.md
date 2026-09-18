@@ -86,8 +86,8 @@ only the one-time schema deployment itself remains undone by design.
 
 A real GitHub Actions pipeline exists at `.github/workflows/ci.yml` (section 35):
 checkout → install → build every package → generate the Prisma client → apply
-migrations → seed → lint → build (api + web) → the full e2e suite (90 tests across
-12 spec files as of Phase 13), running against a genuine ephemeral PostgreSQL 16
+migrations → seed → lint → build (api + web) → the full e2e suite (91 tests across
+12 spec files as of Phase 14), running against a genuine ephemeral PostgreSQL 16
 service container (not a mock), on every push and pull request to `main`/`master`.
 Every secret-shaped environment variable the pipeline needs (`JWT_SECRET`,
 `MFA_ENCRYPTION_KEY`, `EVIDENCE_ENCRYPTION_KEY`,
@@ -95,21 +95,32 @@ Every secret-shaped environment variable the pipeline needs (`JWT_SECRET`,
 generated fresh at the start of each run and discarded with the runner — deliberately
 never a stored repository secret, since there is nothing here that needs to persist
 or be protected: the database is a throwaway container seeded with clearly-labeled
-DEMO/TEST data (section 47) and destroyed at the job's end. **Honest scope note: this
-workflow was written and every command in it individually verified to work correctly
-against the same local Postgres this project develops against, but the workflow file
-itself has not yet been run by GitHub Actions**, since that requires the repository
-to actually exist on GitHub — which is the next step, described below. No deploy
-step exists yet; see the note in `.github/workflows/ci.yml`'s own header comment for
-why that's deliberately deferred rather than half-built.
+DEMO/TEST data (section 47) and destroyed at the job's end. No deploy step exists
+yet; see the note in `.github/workflows/ci.yml`'s own header comment for why that's
+deliberately deferred rather than half-built.
+
+**This workflow has actually been run by GitHub Actions, not just written and
+locally verified** — the repository was pushed (see below) specifically so this
+could be confirmed for real. **The first real run failed**, catching a genuine bug
+this local verification had missed: the workflow generated the Prisma client but
+never compiled `packages/database` itself before running lint, so every file
+importing `@bpfmps/database` (which resolves to that package's *built* output, not
+its source) hit dozens of `@typescript-eslint/no-unsafe-*` type-resolution errors.
+Every local command had been tested against an environment where
+`packages/database` was already built from earlier work in the same session,
+which masked the missing step — only a genuinely clean checkout, run for real,
+surfaced it. Fixed by adding an explicit build step in the same position the root
+`build` script already uses; the second run passed end to end (all 18 workflow
+steps green, ~2 minutes, including the full e2e suite) — see
+`https://github.com/clement645/anticorruption/actions` for the actual runs.
 
 ## GitHub Repository
 
-This project's repository is `https://github.com/clement645/anticorruption`. As of
-this document, the local working tree has not yet been pushed there — publishing the
-first commit(s) to a real, shared remote is treated as a deliberate, confirmed action
-(see IMPLEMENTATION_PLAN.md Phase 14), not something done automatically alongside
-everything else in this pass.
+This project's repository, `https://github.com/clement645/anticorruption`, now
+holds the full initial commit history — pushed during Phase 14 with the user's
+explicit confirmation (publishing a first commit to a real, shared remote is
+exactly the kind of action this agent treats as requiring that, not something
+done automatically alongside everything else in a pass).
 
 ## Backup & Disaster Recovery (Phase 14)
 
