@@ -102,6 +102,14 @@ jobs:
         run: npm run build:storage
       - name: Generate Prisma client
         run: npm run prisma:generate
+      # Must come after prisma:generate (needs the generated client) and
+      # before lint/build (apps/api imports @bpfmps/database's *built* dist
+      # output, not its source) — missing this step is exactly what the
+      # first real run of this workflow caught: ESLint's type-aware rules
+      # cascaded into dozens of "type cannot be resolved" errors because
+      # @bpfmps/database had never actually been compiled.
+      - name: Build packages/database
+        run: npm run build:database
       - name: Apply migrations
         run: npm run prisma:migrate:deploy
       - name: Seed demo/test data
