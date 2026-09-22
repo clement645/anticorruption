@@ -22,7 +22,7 @@
     # netlify.toml has no env-var interpolation for header values (this is a
     # static TOML file, not templated at build time) — so this must be
     # hand-edited to the real backend origin once the backend host exists.
-    # Still http://localhost:3000 today because that's genuinely the only
+    # Still https://anticorruption-qfkv.onrender.com today because that's genuinely the only
     # origin that has ever served this API — updating this to a fake/guessed
     # production URL would be a false claim. See DEPLOYMENT.md § Backend.
-    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://localhost:3000"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://anticorruption-qfkv.onrender.com"
