@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@bpfmps/database';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
+import { DuplicatePaymentDetector } from '../../risk/services/duplicate-payment.detector';
 import type { CreateInvoiceDto } from '../dto/create-invoice.dto';
 import type { RejectInvoiceDto } from '../dto/reject-invoice.dto';
 import type { InvoiceView } from '../contracts.types';
@@ -52,6 +53,7 @@ export class InvoicesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly duplicatePaymentDetector: DuplicatePaymentDetector,
   ) {}
 
   async create(
@@ -70,6 +72,32 @@ export class InvoicesService {
     if (po.status !== 'ISSUED') {
       throw new BadRequestException(
         'Purchase order must be ISSUED before an invoice can be submitted against it',
+      );
+    }
+
+    // Legal & policy integration layer (post-launch, "no-over-invoicing" —
+    // see apps/api/src/modules/compliance/compliance-rules.ts): a purchase
+    // order's cumulative invoiced amount must never exceed what it actually
+    // authorizes. REJECTED invoices don't count (they were never valid
+    // claims); everything else (SUBMITTED/VERIFIED) does, since a
+    // not-yet-verified invoice still represents a live claim against the
+    // same ceiling. This also structurally closes the simplest form of
+    // duplicate-payment fraud — resubmitting a full-amount invoice a second
+    // time — since a second one would almost always breach the ceiling; see
+    // DuplicatePaymentDetector below for the pattern that DOESN'T (a
+    // large PO with room for two identical-amount invoices).
+    const existingInvoices = await this.prisma.invoice.findMany({
+      where: { purchaseOrderId, status: { not: 'REJECTED' } },
+    });
+    const alreadyInvoiced = existingInvoices.reduce(
+      (sum, inv) => sum.add(inv.amount),
+      new Prisma.Decimal(0),
+    );
+    const newTotal = alreadyInvoiced.add(new Prisma.Decimal(dto.amount));
+    if (newTotal.greaterThan(po.amount)) {
+      throw new ConflictException(
+        `This invoice would bring the purchase order's cumulative invoiced amount to ` +
+          `${newTotal.toString()}, exceeding its authorized amount of ${po.amount.toString()}.`,
       );
     }
 
@@ -121,6 +149,8 @@ export class InvoicesService {
       ipAddress: requestMeta.ipAddress,
       userAgent: requestMeta.userAgent,
     });
+
+    await this.duplicatePaymentDetector.evaluateInvoice(invoice.id);
 
     return toView(invoice);
   }

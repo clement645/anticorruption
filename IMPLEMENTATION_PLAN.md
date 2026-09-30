@@ -1337,32 +1337,235 @@ full, detailed account of everything above.
 
 ## Next Steps
 
-All 14 phases of the original roadmap are now complete. Of the two external
-connections Phase 14 brought into reach, one is done and one remains an
-explicit, pending human action:
+All 14 phases of the original roadmap are complete, and the system is live:
+repository on GitHub (`https://github.com/clement645/anticorruption`), CI
+green on GitHub Actions, backend hosted on Render, frontend hosted on Netlify,
+schema deployed to the real Neon project.
 
-1. **Repository pushed and CI verified — done.** The full 14-phase working tree
-   was committed and pushed to `https://github.com/clement645/anticorruption`
-   with the user's explicit confirmation. The CI workflow
-   (`.github/workflows/ci.yml`) has genuinely run on GitHub Actions: its first
-   real run failed (catching a real `packages/database` build-ordering gap —
-   see "Notable engineering decisions" above), and after a one-line fix, the
-   second run passed end to end.
-2. **Deploy the schema to the real Neon project — still pending.** Schema
-   deployment (`prisma migrate deploy`) against the real Neon project was
-   attempted and blocked by this environment's own safety tooling as a
-   production-deploy action; presented to the user as an explicit choice, and
-   the user chose to run it themselves rather than grant this agent permission
-   to do so. With `DATABASE_URL`/`DIRECT_DATABASE_URL` in `apps/api/.env`
-   pointed at the real Neon connection strings (already confirmed to work as a
-   pure swap, see DEPLOYMENT.md § Local Development), run
-   `npm run prisma:migrate:deploy` from the repo root, then
-   `npm run prisma:seed`.
+Further work is genuinely optional hardening/extension rather than anything
+the original spec calls for: the residual risks named throughout this document
+and in SECURITY.md/THREAT_MODEL.md (cross-resource case views, retention
+policies, step-up authentication, a real Neon recovery drill, sustained/
+write-heavy load testing, and the various per-phase scope notes) are the
+honest list of what a next iteration would prioritize.
 
-Beyond that, further work is genuinely optional hardening/extension rather
-than anything the original spec calls for: the residual risks named throughout
-this document and in SECURITY.md/THREAT_MODEL.md (cross-resource case views,
-retention policies, step-up authentication, a real Neon recovery drill,
-sustained/write-heavy load testing, and the various per-phase scope notes) are
-the honest list of what a next iteration would prioritize, not blockers to
-calling this project's initial build complete.
+## Post-Launch — Admin User Management + UI Design System
+
+Requested after launch: an admin-facing UI for creating user accounts and
+assigning roles (the API already supported this since Phase 2 — `POST
+/api/v1/users` — but there was no frontend for it), plus a full visual
+refresh of the frontend to a more professional, modern look.
+
+- **Backend**: added `PATCH /api/v1/users/:id` (new `users:update`
+  permission, granted only to Super Administrator) so an admin can change an
+  existing user's roles (fully replaced, not diffed), status
+  (ACTIVE/SUSPENDED/LOCKED/PENDING_ACTIVATION), organization, or department.
+  An actor cannot change their own status — prevents accidental self-lockout.
+  `UsersService.list()` now also returns each user's organization/department
+  names and role names (previously role IDs weren't even joined in). See
+  API.md for the full contract. Covered by 8 new e2e cases in
+  `iam.e2e-spec.ts` (permission gating, role replacement, self-status-change
+  block, 404 on unknown user, duplicate-email 409).
+- **Frontend**: new `AdminUsersView.vue` at `/admin/users` (gated on
+  `users:read`/`users:create`/`users:update`) — a user table plus create/edit
+  modals (role checkboxes, status control, a generate-temporary-password
+  helper). New `stores/admin.ts` Pinia store.
+- **Design system**: `apps/web/src/style.css` now defines a small reusable
+  component layer on top of Tailwind v4 (`.btn`/`.card`/`.badge`/
+  `.table-shell`/`.input`/`.page-header` etc.) plus a brand indigo color scale
+  and the Inter typeface, replacing the ad-hoc slate-only utility classes used
+  since Phase 1. `App.vue` was rebuilt as a sidebar+topbar shell (grouped,
+  permission-gated navigation, user menu) for authenticated users, with the
+  previous flat top-nav kept only for the unauthenticated/public state. The
+  `@lucide/vue` icon set was added. All views were brought onto the new
+  system for visual consistency (buttons, cards, tables, badges, forms) without
+  changing any business logic.
+- **Real incident during this work, disclosed to the user**: while testing
+  the new endpoint against the local e2e suite, `packages/database/.env` was
+  discovered to still hold the real Neon production connection string
+  (left over from Phase 14's connectivity check) — Prisma's generated client
+  loads its own `.env` from the schema package's directory independently of
+  `apps/api/.env`, so NestJS's config validation was reading the intended
+  local values while the actual database driver was silently connecting to
+  the real Neon database. One e2e run's `beforeAll` (idempotent role/
+  permission/demo-user upserts, all `[DEMO]`/`[E2E]`-prefixed) executed
+  against production before this was caught; `packages/database/.env` has
+  been corrected to local Postgres, and the affected test process was killed.
+  No secrets were exposed (the file was already gitignored and never
+  committed). See DEPLOYMENT.md for the cleanup note.
+
+## Post-Launch — Per-Official Digital Signatures (Identity Verification Layer)
+
+Requested after launch as the first of a longer anti-corruption feature gap
+list the user asked to work through, prioritized "highest impact first":
+cryptographic, non-repudiable per-official authorization for high-stakes
+actions, distinct from the system-wide audit chain signature that has
+existed since Phase 3. This closes a gap SECURITY.md's Digital Signatures
+section had explicitly flagged since Phase 3 ("Phase 6+ for business
+actions") and never actually built.
+
+- **Schema**: `digital_identities` (Phase 2's deliberate, never-written-to
+  placeholder table) is now wired up. Two additions: a new
+  `signature_nonces` table (replay defense — `nonce` is genuinely
+  `@unique`, not just indexed) and three new nullable `audit_events`
+  columns (`actorSignature`, `actorKeyId`, `actorSignedPayload`) distinct
+  from the pre-existing system chain-signature columns.
+- **Backend**: `IdentityService` (enroll/verify a per-user Ed25519 public
+  key — reuses `packages/crypto`'s existing `signEd25519`/`verifyEd25519`
+  as-is, no new crypto primitives needed), a new `@RequireSignature()`
+  decorator + `SignatureGuard` (mirrors the existing `PermissionsGuard`
+  pattern — global `APP_GUARD`, no-op unless a route opts in), two new
+  endpoints (`GET`/`POST /users/me/signing-key`), and
+  `AuditService.verifyEvent()` extended to independently re-verify a
+  recorded `actorSignature` against the EXACT historical key that produced
+  it (never "the actor's current key" — key rotation/revocation is
+  forward-only, matching real PKI semantics).
+- **Key custody — the actual design decision that matters here**: the
+  private key is generated CLIENT-SIDE (`apps/web/src/lib/signing.ts`,
+  `@noble/ed25519` + `@noble/hashes`) and only the public key is ever
+  uploaded. This was a deliberate reversal from an initial "admin generates
+  the keypair and hands the private key to the user" design (mirroring the
+  existing `temporaryPassword` pattern) — that would have let an admin
+  forge signatures on a user's behalf, defeating the entire point of
+  individual non-repudiation. Verified the client/server crypto genuinely
+  interoperate (noble-signed payloads pass `node:crypto`'s Ed25519
+  verification, and noble's SPKI-encoded public keys parse correctly via
+  `createPublicKey()`) with a standalone Node script before trusting it,
+  not just by inspecting the code.
+- **First real wiring**: `POST /budgets/:id/approve` (`budget:approve`).
+  Chosen as the highest-leverage example already in the system. This had a
+  larger-than-expected blast radius: 8 other e2e spec files use budget
+  approval purely as a fixture-setup step for unrelated phases (procurement,
+  contracts, projects, supplier, risk, transparency) — all 8 were updated
+  to enroll a signing key and sign that one call, via a new shared test
+  helper (`apps/api/test/helpers/signing.ts`), rather than weakening the
+  requirement to avoid touching them.
+- **Frontend**: `stores/signingKey.ts` + `SigningKeyView.vue`
+  (`/settings/signing-key`, linked from the user menu) — enroll/rotate a
+  key, see its status. `BudgetsView.vue`'s Approve button now signs the
+  request automatically when a local key exists, with a clear error
+  directing the user to enroll one first if not.
+- **Tests**: a new `signature.e2e-spec.ts` (10 cases) covering enrollment,
+  missing/wrong-key/expired/replayed signatures, that the audit trail
+  genuinely records and later re-verifies the actor's signature, and that
+  key rotation revokes a key for new signatures without invalidating its
+  past ones. Full e2e suite (13 files, 109 tests) passes.
+- **Honest scope limit, stated in SECURITY.md**: the private key lives in
+  browser `localStorage`, not a hardware token or non-extractable
+  WebAuthn key — the right answer for a real deployment, but not
+  something this environment can provision. Everything else about the
+  mechanism is genuinely implemented end-to-end, not simulated.
+
+## Post-Launch — Legal & Policy Integration Layer (Item 2)
+
+Second item in the user-approved "highest impact first" sequence: a citable
+registry of the specific legal/constitutional provisions this system's
+controls implement, plus at least one genuinely new preventive control
+grounded in a real, verified citation — not just a design-principles essay.
+
+- **Research first, code second**: before writing anything, used WebSearch/
+  WebFetch to locate and read the actual Public Procurement and Asset
+  Disposal Regulations, 2020 (Legal Notice No. 69 of 2020, under Act No. 33
+  of 2015) — the CURRENT regulations — rather than trusting memorized
+  section numbers. This caught a real accuracy trap: the only COMPLETE
+  procurement-method threshold matrix this session could actually access
+  was a 2006 Legal Notice under the since-REPEALED 2005 Act. Its exact KES
+  figures and section numbers (e.g. "s 74(2)") do not carry over to the
+  current 2015 Act/2020 Regulations, which renumbered everything. Decision:
+  never present those stale figures as current law. The current
+  regulation's own table of contents WAS directly confirmed (Regulation 26
+  "Threshold matrix", Regulation 43 "Procurement pricing and requirement not
+  to split contracts"), so those specific citations are real and verified;
+  the numeric Second Schedule thresholds are explicitly marked
+  `enforcement: 'design-principle'` — NOT hard-coded — with the registry
+  entry itself explaining why and what a real deployment must confirm
+  before relying on any figure.
+- **New module**: `apps/api/src/modules/compliance/` — a typed, static
+  `COMPLIANCE_RULES` registry (5 entries: no-contract-splitting,
+  tiered-procurement-methods, fair-competitive-procurement,
+  auditor-general-oversight, separation-of-duties-financial-controls), each
+  with `citation`, `verifiedAgainst` (what was and wasn't independently
+  checked), `enforcement` (`preventive`/`detective`/`design-principle`), and
+  `enforcedBy` (the exact file implementing it). Exposed publicly,
+  unauthenticated, at `GET /api/v1/compliance/rules` — the point is
+  citizen/auditor visibility, matching the Phase 12 transparency pattern.
+- **Real new preventive control**: `SplitProcurementDetector.
+  findBlockingAlert()` (Regulation 43). Previously (Phase 8) this detector
+  only ran AFTER a procurement request's approval, purely to log an
+  alert — by the time it fired, the budget commitment already existed.
+  Now `ProcurementRequestsService.approve()` checks BEFORE creating the
+  commitment and blocks (409) if the specific request is named in an
+  unresolved HIGH-severity split-procurement alert, until an Auditor
+  reviews it (`risk:review`).
+- **A real bug caught by e2e testing, not just review**: the first version
+  of this gate checked "does this ORGANIZATION have any unresolved HIGH
+  alert anywhere", which broke two pre-existing, unrelated procurement e2e
+  tests — a completely legitimate later procurement request got blocked
+  just because the same fixture organization had an old, unrelated flag
+  from an earlier test case. This revealed a genuine design flaw, not just
+  a test-fixture problem: in production, a real ministry legitimately raises
+  many unrelated requests across different programs, and organization-wide
+  blocking over one old flag would be a disproportionate side effect,
+  trivially weaponizable as a denial-of-service against a whole ministry's
+  procurement. Fixed by scoping the block to the SPECIFIC flagged request
+  batch (`evidence.requestIds` contains this request), not the organization
+  at large. Verified via a new dedicated e2e case that creates a real
+  3-request HIGH-severity pattern, confirms the still-pending flagged
+  request is blocked, then confirms it unblocks once an Auditor dismisses
+  the alert.
+- **Tests**: new `compliance.e2e-spec.ts` (registry shape/content), a new
+  case in `risk.e2e-spec.ts` (the blocking gate, end-to-end). Full suite (14
+  files, 113 tests) passes.
+
+## Post-Launch — Duplicate-Payment Detector (Item 3)
+
+Third item in the sequence: the duplicate-invoice/duplicate-payment
+detection explicitly deferred back in Phase 8 ("no `Invoice` entity exists
+yet") and flagged as a residual risk in THREAT_MODEL.md ever since Phases 8
+and 9. Now that `Invoice`/`PurchaseOrder` (Phase 9) exist, built for real.
+
+- **First finding, before writing any detector**: `Invoice.invoiceNumber`
+  is already `@unique` at the database level (Phase 9 decision), so the
+  naive fraud pattern this item's name suggests — literally resubmitting
+  the same invoice number — was already structurally impossible. The real
+  gap was different and, once found, more consequential: NOTHING checked
+  whether a purchase order's cumulative invoiced amount stayed within what
+  it actually authorizes. `InvoicesService.create()` had no ceiling check
+  at all.
+- **Two controls, matching the project's established preventive/detective
+  split** (see the `enforcement` field pattern from item 2's compliance
+  registry): a hard preventive ceiling (`no-over-invoicing` — a PO's
+  cumulative non-rejected invoiced total can never exceed its authorized
+  amount, enforced directly in `InvoicesService.create()`), and a detective
+  `DuplicatePaymentDetector` (new risk detector, `DUPLICATE_PAYMENT` added
+  to `RiskDetectorType` — small migration) for the case the ceiling can't
+  catch: a PO large enough that two identical-amount invoices both fit
+  under it, or the same amount billed against two different purchase
+  orders. HIGH severity if same PO, MEDIUM if different — pure detection,
+  never blocking, consistent with `RiskAlertsService`'s own stated
+  invariant that the risk engine itself has no code path that can block
+  anything.
+- Both new compliance-registry entries (`no-over-invoicing`,
+  `duplicate-payment-detection`) added to the same citable registry item 2
+  built, continuing that item's honesty discipline: the preventive ceiling
+  is cited to the general PFM Act public-money-control principle (not a
+  specific unverified section number, same reasoning as the
+  separation-of-duties entry).
+- **Tests**: two new `contracts.e2e-spec.ts` cases (the ceiling rejecting
+  an over-limit invoice while allowing one that exactly fills remaining
+  headroom; the detector flagging a same-PO, same-amount resubmission as
+  HIGH severity). Full suite (14 files, 115 tests) passes — verified twice,
+  once with `--maxWorkers=2` and once sequentially (`--maxWorkers=1`) after
+  two parallel runs showed intermittent failures in `blockchain.e2e-spec.ts`
+  unrelated to this work (a pre-existing, documented anchoring-timing race
+  under worker contention, confirmed by that file passing cleanly in
+  isolation and the full suite passing cleanly end-to-end when run
+  sequentially).
+
+Next up in the same "highest impact first" sequence: officer/politician
+accountability scorecards, citizen voting on project priorities, step-up
+MFA on other sensitive actions, and GPS-tagged evidence capture — see the
+gap analysis this phase's own planning turn produced for the full list and
+reasoning on what's genuinely buildable here vs. blocked on external
+accounts (SMS/Telegram/WhatsApp push, live market-data pricing) or physical
+infrastructure (drones/IoT, distributed international hosting).

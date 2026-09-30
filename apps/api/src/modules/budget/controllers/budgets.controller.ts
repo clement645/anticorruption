@@ -15,8 +15,17 @@ import { BudgetsService } from '../services/budgets.service';
 import { CreateBudgetDto } from '../dto/create-budget.dto';
 import { RejectBudgetDto } from '../dto/reject-budget.dto';
 import { RequirePermissions } from '../../iam/decorators/permissions.decorator';
+import { RequireSignature } from '../../iam/decorators/require-signature.decorator';
 import { CurrentUser } from '../../iam/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../iam/types/jwt-payload.type';
+
+type SignedRequest = Request & {
+  verifiedSignature?: {
+    signature: string;
+    keyId: string;
+    signedPayload: string;
+  };
+};
 
 function meta(req: Request) {
   return { ipAddress: req.ip, userAgent: req.headers['user-agent'] };
@@ -75,12 +84,18 @@ export class BudgetsController {
   @Post(':id/approve')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('budget:approve')
+  @RequireSignature()
   approve(
     @Param('id') id: string,
     @CurrentUser() actor: AuthenticatedUser,
-    @Req() req: Request,
+    @Req() req: SignedRequest,
   ) {
-    return this.budgetsService.approve(id, actor, meta(req));
+    return this.budgetsService.approve(
+      id,
+      actor,
+      meta(req),
+      req.verifiedSignature,
+    );
   }
 
   @Post(':id/reject')

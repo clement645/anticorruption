@@ -75,58 +75,56 @@ function formatCategory(category: string): string {
 
 <template>
   <section class="mx-auto max-w-2xl px-4 py-10">
-    <h1 class="text-2xl font-semibold text-slate-900">Report a Concern</h1>
-    <p class="mt-1 text-sm text-slate-600">
-      Anonymous by default. No account, no sign-in, and no personal information is required to
-      submit or follow up on a report. You'll receive a tracking code — save it, it's the only
-      way to check on your report or add more information later.
-    </p>
+    <div class="page-header">
+      <h1 class="page-title">Report a Concern</h1>
+      <p class="page-subtitle">
+        Anonymous by default. No account, no sign-in, and no personal information is required to
+        submit or follow up on a report. You'll receive a tracking code — save it, it's the only
+        way to check on your report or add more information later.
+      </p>
+    </div>
 
     <nav class="mt-6 flex gap-1 border-b border-slate-200 text-sm">
       <button
         type="button"
-        class="rounded-t-md px-3 py-2"
-        :class="activeTab === 'submit' ? 'border-b-2 border-slate-900 font-medium text-slate-900' : 'text-slate-500 hover:text-slate-800'"
+        class="rounded-t-lg px-3 py-2"
+        :class="activeTab === 'submit' ? 'border-b-2 border-brand-600 font-medium text-brand-700' : 'text-slate-500 hover:text-slate-800'"
         @click="activeTab = 'submit'"
       >
         Submit a report
       </button>
       <button
         type="button"
-        class="rounded-t-md px-3 py-2"
-        :class="activeTab === 'status' ? 'border-b-2 border-slate-900 font-medium text-slate-900' : 'text-slate-500 hover:text-slate-800'"
+        class="rounded-t-lg px-3 py-2"
+        :class="activeTab === 'status' ? 'border-b-2 border-brand-600 font-medium text-brand-700' : 'text-slate-500 hover:text-slate-800'"
         @click="activeTab = 'status'"
       >
         Check status / add information
       </button>
     </nav>
 
-    <p v-if="store.error" class="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+    <p v-if="store.error" class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
       {{ store.error }}
     </p>
 
     <!-- Submit -->
     <div v-if="activeTab === 'submit'" class="mt-6">
-      <div v-if="store.submittedTrackingCode" class="rounded-lg border border-emerald-200 bg-emerald-50 p-6">
+      <div v-if="store.submittedTrackingCode" class="rounded-xl border border-emerald-200 bg-emerald-50 p-6">
         <h2 class="text-sm font-medium text-emerald-900">Report submitted</h2>
         <p class="mt-1 text-sm text-emerald-800">
           Your tracking code — save this now, it will not be shown again and cannot be recovered:
         </p>
         <div class="mt-2 flex items-center gap-2">
-          <code class="flex-1 rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm">{{
+          <code class="flex-1 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm">{{
             store.submittedTrackingCode
           }}</code>
-          <button
-            type="button"
-            class="rounded-md border border-emerald-300 bg-white px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
-            @click="copyTrackingCode"
-          >
+          <button type="button" class="btn btn-secondary btn-sm text-emerald-700" @click="copyTrackingCode">
             {{ copiedTrackingCode ? 'Copied' : 'Copy' }}
           </button>
         </div>
         <button
           type="button"
-          class="mt-3 text-xs text-emerald-700 underline"
+          class="btn btn-ghost btn-sm mt-3 text-emerald-700"
           @click="store.submittedTrackingCode = null"
         >
           Submit another report
@@ -135,43 +133,39 @@ function formatCategory(category: string): string {
 
       <form v-else class="space-y-3" @submit.prevent="handleSubmit">
         <div>
-          <label class="block text-xs text-slate-500">Category</label>
-          <select v-model="submitForm.category" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+          <label class="field-label">Category</label>
+          <select v-model="submitForm.category" class="select mt-1">
             <option v-for="c in categories" :key="c" :value="c">{{ formatCategory(c) }}</option>
           </select>
         </div>
         <div>
-          <label class="block text-xs text-slate-500">What happened?</label>
+          <label class="field-label">What happened?</label>
           <textarea
             v-model="submitForm.description"
             required
             minlength="10"
             rows="6"
             placeholder="Describe what you observed, when, and who was involved if known."
-            class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            class="input mt-1"
           />
         </div>
         <div>
-          <label class="block text-xs text-slate-500">Supporting evidence (optional)</label>
+          <label class="field-label">Supporting evidence (optional)</label>
           <input type="file" class="mt-1 text-sm" @change="onFileChange" />
         </div>
         <div>
-          <label class="block text-xs text-slate-500">Contact (optional — only if you want to be reachable)</label>
+          <label class="field-label">Contact (optional — only if you want to be reachable)</label>
           <input
             v-model="submitForm.contact"
             placeholder="Email or phone — left blank by default"
-            class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            class="input mt-1"
           />
           <p class="mt-1 text-[11px] text-slate-400">
             Encrypted at rest and visible only to the investigator assigned to your report. You
             can safely leave this blank — the tracking code alone is enough to follow up.
           </p>
         </div>
-        <button
-          type="submit"
-          :disabled="store.loading || uploading"
-          class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-        >
+        <button type="submit" :disabled="store.loading || uploading" class="btn btn-primary">
           {{ store.loading || uploading ? 'Submitting…' : 'Submit report' }}
         </button>
       </form>
@@ -183,21 +177,15 @@ function formatCategory(category: string): string {
         <input
           v-model="trackingCodeInput"
           placeholder="WB-…"
-          class="flex-1 rounded-md border border-slate-300 px-2 py-1.5 font-mono text-sm"
+          class="input flex-1 font-mono"
         />
-        <button
-          type="submit"
-          :disabled="store.loading"
-          class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-        >
-          Check
-        </button>
+        <button type="submit" :disabled="store.loading" class="btn btn-primary btn-sm">Check</button>
       </form>
 
-      <div v-if="store.reportStatus" class="mt-4 rounded-lg border border-slate-200 bg-white p-4 text-sm">
+      <div v-if="store.reportStatus" class="mt-4 card p-4 text-sm">
         <div class="flex items-center justify-between">
           <span class="font-medium text-slate-900">{{ formatCategory(store.reportStatus.category) }}</span>
-          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700">{{ store.reportStatus.status }}</span>
+          <span class="badge badge-neutral">{{ store.reportStatus.status }}</span>
         </div>
         <p class="mt-2 text-slate-600">{{ store.reportStatus.description }}</p>
 
@@ -221,12 +209,12 @@ function formatCategory(category: string): string {
         </ul>
 
         <form class="mt-3 flex gap-2" @submit.prevent="handleReply">
-          <input v-model="replyMessage" placeholder="Add a reply…" class="flex-1 rounded-md border border-slate-300 px-2 py-1 text-xs" />
-          <button type="submit" class="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">Send</button>
+          <input v-model="replyMessage" placeholder="Add a reply…" class="input flex-1 px-2 py-1 text-xs" />
+          <button type="submit" class="btn btn-secondary btn-sm">Send</button>
         </form>
 
         <div class="mt-3">
-          <label class="block text-xs text-slate-500">Add more evidence</label>
+          <label class="field-label">Add more evidence</label>
           <input
             type="file"
             class="mt-1 text-xs"

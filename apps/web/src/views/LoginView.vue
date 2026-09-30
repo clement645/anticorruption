@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { ShieldCheck, Loader2 } from '@lucide/vue'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -45,73 +46,80 @@ async function submitMfa() {
 </script>
 
 <template>
-  <section class="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-4">
-    <h1 class="text-xl font-semibold text-slate-900">Sign in to B-PFMPS</h1>
-    <p class="mt-1 text-sm text-slate-600">DEMO/TEST credentials only — see IMPLEMENTATION_PLAN.md.</p>
-
-    <form
-      v-if="stage === 'credentials'"
-      class="mt-6 space-y-4"
-      @submit.prevent="submitCredentials"
-    >
-      <div>
-        <label for="email" class="block text-sm font-medium text-slate-700">Email</label>
-        <input
-          id="email"
-          v-model="email"
-          type="email"
-          required
-          autocomplete="username"
-          class="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none"
-        />
-      </div>
-      <div>
-        <label for="password" class="block text-sm font-medium text-slate-700">Password</label>
-        <input
-          id="password"
-          v-model="password"
-          type="password"
-          required
-          autocomplete="current-password"
-          class="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none"
-        />
+  <section class="flex min-h-[calc(100vh-65px)] items-center justify-center bg-slate-50 px-4 py-12">
+    <div class="w-full max-w-md">
+      <div class="mb-6 flex flex-col items-center text-center">
+        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-600 shadow-sm">
+          <ShieldCheck class="h-6 w-6 text-white" />
+        </div>
+        <h1 class="mt-4 text-xl font-semibold tracking-tight text-slate-900">Sign in to B-PFMPS</h1>
+        <p class="mt-1 text-sm text-slate-500">
+          Blockchain-Based Integrated Public Financial Management &amp; Procurement System
+        </p>
       </div>
 
-      <p v-if="localError" class="text-sm text-red-700">{{ localError }}</p>
+      <div class="card p-6 sm:p-8">
+        <form
+          v-if="stage === 'credentials'"
+          class="space-y-4"
+          @submit.prevent="submitCredentials"
+        >
+          <div>
+            <label for="email" class="field-label">Email</label>
+            <input
+              id="email"
+              v-model="email"
+              type="email"
+              required
+              autocomplete="username"
+              class="input mt-1"
+            />
+          </div>
+          <div>
+            <label for="password" class="field-label">Password</label>
+            <input
+              id="password"
+              v-model="password"
+              type="password"
+              required
+              autocomplete="current-password"
+              class="input mt-1"
+            />
+          </div>
 
-      <button
-        type="submit"
-        :disabled="submitting"
-        class="w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-      >
-        {{ submitting ? 'Signing in…' : 'Sign in' }}
-      </button>
-    </form>
+          <p v-if="localError" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{{ localError }}</p>
 
-    <form v-else class="mt-6 space-y-4" @submit.prevent="submitMfa">
-      <div>
-        <label for="mfaCode" class="block text-sm font-medium text-slate-700">
-          Authenticator code or backup code
-        </label>
-        <input
-          id="mfaCode"
-          v-model="mfaCode"
-          type="text"
-          required
-          autocomplete="one-time-code"
-          class="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none"
-        />
+          <button type="submit" :disabled="submitting" class="btn btn-primary w-full">
+            <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
+            {{ submitting ? 'Signing in…' : 'Sign in' }}
+          </button>
+        </form>
+
+        <form v-else class="space-y-4" @submit.prevent="submitMfa">
+          <div>
+            <label for="mfaCode" class="field-label">Authenticator code or backup code</label>
+            <input
+              id="mfaCode"
+              v-model="mfaCode"
+              type="text"
+              required
+              autocomplete="one-time-code"
+              class="input mt-1"
+            />
+          </div>
+
+          <p v-if="localError" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{{ localError }}</p>
+
+          <button type="submit" :disabled="submitting" class="btn btn-primary w-full">
+            <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
+            {{ submitting ? 'Verifying…' : 'Verify' }}
+          </button>
+        </form>
       </div>
 
-      <p v-if="localError" class="text-sm text-red-700">{{ localError }}</p>
-
-      <button
-        type="submit"
-        :disabled="submitting"
-        class="w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-      >
-        {{ submitting ? 'Verifying…' : 'Verify' }}
-      </button>
-    </form>
+      <p class="mt-6 text-center text-xs text-slate-400">
+        DEMO/TEST credentials only — see IMPLEMENTATION_PLAN.md.
+      </p>
+    </div>
   </section>
 </template>

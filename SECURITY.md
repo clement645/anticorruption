@@ -63,17 +63,133 @@ trust.
   available via session revocation (logout-everywhere), which does take effect
   immediately since refresh requires a live, unrevoked session.
 
-## Digital Signatures (Phase 3 — implemented for audit events; Phase 6+ for business actions)
+## Digital Signatures (Phase 3 — audit events; post-launch — per-official business actions)
 
-Every audit event is signed at the application layer with Ed25519
-(`packages/crypto/src/signing.ts`): actor ID, timestamp, action, resource ID, payload
-hash, signature, key identifier, and previous event hash are all captured together
-(blockchain transaction reference is added in Phase 4). The signing abstraction is
-deliberately key-agnostic — `sign`/`verify` take PEM text — so a government PKI/HSM can
-be substituted for the application-managed key (`AUDIT_SIGNING_PRIVATE_KEY` in env)
-later without any caller changing. High-value **business** actions (tender publication,
-bid evaluation, award, payment approval, etc.) will use this same signing primitive once
-those modules exist, starting Phase 6.
+Two independent signature layers exist, and it matters that they're kept distinct:
+
+**System chain-integrity signature.** Every audit event is signed at the application
+layer with Ed25519 (`packages/crypto/src/signing.ts`): actor ID, timestamp, action,
+resource ID, payload hash, signature, key identifier, and previous event hash are all
+captured together (blockchain transaction reference is added in Phase 4). This proves
+the audit LOG ITSELF wasn't tampered with — it's signed with one system-wide key
+(`AUDIT_SIGNING_PRIVATE_KEY`), not by the individual who performed the action. The
+signing abstraction is deliberately key-agnostic — `sign`/`verify` take PEM text — so a
+government PKI/HSM can be substituted for the application-managed key later without any
+caller changing.
+
+**Per-official actor signature (implemented post-launch).** For designated
+high-stakes actions, the ACTING USER must additionally prove — with a signature only
+they could produce — that they personally authorized this exact request. This is what
+gives individual, non-repudiable accountability, distinct from "the log wasn't
+tampered with."
+
+- **Key custody is the whole point.** The private key is generated CLIENT-SIDE, in the
+  browser (`apps/web/src/lib/signing.ts`, using `@noble/ed25519`), and only the public
+  key is ever uploaded (`POST /users/me/signing-key`, stored in the `DigitalIdentity`
+  table). The server — including an administrator — never has the means to forge a
+  signature on someone else's behalf. This is the deliberate difference from the
+  Phase 2 `temporaryPassword` pattern (admin-set, transmitted out of band): a signing
+  key must never pass through the admin's hands, or the non-repudiation guarantee is
+  worthless.
+- **What gets signed.** A route decorated with `@RequireSignature()`
+  (`apps/api/src/modules/iam/guards/signature.guard.ts`) requires the request body to
+  carry `signature`, `signatureTimestamp`, `signatureNonce`. The client signs the
+  canonical string `${METHOD} ${path} ${timestamp} ${nonce}`. The server re-derives the
+  identical string, verifies it against the actor's currently-active `DigitalIdentity`
+  public key, and rejects (400) a timestamp older than 5 minutes.
+- **Replay protection.** `signatureNonce` is inserted into `SignatureNonce` (a unique
+  constraint, not a pre-check) before the action proceeds — a captured/replayed
+  signature is rejected (403) even against the same still-pending resource, and even
+  under a race (two identical requests landing concurrently).
+- **Key rotation without retroactive invalidation.** A user can enroll a new key at any
+  time; the old `DigitalIdentity` row is marked `revokedAt` (can no longer sign anything
+  NEW) but never deleted. `AuditService.verifyEvent()` re-verifies a historical
+  `actorSignature` against the EXACT key (`actorKeyId`) that produced it, not "the
+  actor's current key" — this mirrors real PKI semantics, where revocation is
+  forward-only.
+- **First real wiring:** `POST /budgets/:id/approve` (`budget:approve`). This was
+  chosen as the initial example because it's the highest-leverage, most obviously
+  "an individual authorized public money" action already in the system; extending
+  `@RequireSignature()` to other high-stakes endpoints (award, payment approve/execute)
+  follows the identical pattern and is a natural next iteration, not a new mechanism.
+- **Known limitation, stated plainly:** the private key is kept in browser
+  `localStorage` (per-account-scoped) so it survives a page reload. This is acceptable
+  for a prototype demonstrating the mechanism end-to-end; a real deployment should
+  replace this with a hardware token, the OS keystore, or a non-extractable
+  WebAuthn-backed key, none of which this environment can provision. Everything else
+  about the mechanism — client-side generation, server never seeing the private key,
+  real cryptographic verification, replay protection, rotation semantics — is
+  genuinely implemented, not simulated.
+
+## Legal & Policy Integration Layer (post-launch)
+
+A citable registry (`GET /api/v1/compliance/rules`, public/unauthenticated by
+design — see `apps/api/src/modules/compliance/compliance-rules.ts`) of the specific
+legal and constitutional provisions this system's controls are designed against. The
+point is that a citizen, journalist, auditor, or oversight body can see exactly which
+rule a given control implements in one place, rather than inferring it from scattered
+code comments.
+
+**Honesty constraint that shaped this feature.** Kenyan procurement regulations
+(thresholds especially) are amended periodically by the PPRA/National Treasury, and
+this system has no way to auto-verify a citation against the current Kenya Gazette.
+Fabricating a precise-looking but unverified legal citation would be worse than not
+encoding the rule at all — especially in a system whose entire purpose is anti-corruption
+compliance. Every rule in the registry was independently checked against the actual
+text of the cited instrument before being added (not recalled from memory), and is
+tagged with exactly what was and wasn't verified. Three enforcement categories exist:
+
+- `preventive` — a real, currently-running check that can BLOCK an action.
+- `detective` — a real, currently-running check that flags an action for independent
+  human review rather than blocking it (used where blocking would be disproportionate).
+- `design-principle` — NOT a hard-coded numeric check. Used for provisions (like the
+  procurement-method threshold matrix) whose exact figures this system deliberately
+  does not hard-code, because the only complete matrix available during development was
+  a 2006 Legal Notice under the since-repealed 2005 Act — its numbers cannot be assumed
+  current under the 2015 Act's 2020 Regulations. A real deployment must confirm the
+  current Second Schedule directly from PPRA (ppra.go.ke) before relying on any such
+  figure.
+
+**Real preventive control added**: `SplitProcurementDetector.findBlockingAlert()`
+(Public Procurement and Asset Disposal Regulations, 2020, Regulation 43 — "requirement
+not to split contracts", confirmed against the Regulations' own table of contents).
+Previously (Phase 8) this detector only ran AFTER a procurement request was approved,
+purely to raise an informational alert — by the time it fired, the budget commitment
+already existed. Now, `ProcurementRequestsService.approve()` checks BEFORE creating the
+commitment: if the specific request being approved is named in an unresolved
+(OPEN/UNDER_REVIEW) HIGH-severity split-procurement alert, approval is blocked (409)
+until an Auditor or Internal Auditor independently reviews it (`risk:review` —
+deliberately withheld from Procurement Officer since Phase 8). Deliberately scoped to
+the specific flagged request batch (`evidence.requestIds`), not "this organization has
+any unresolved alert anywhere" — an early version of this check was organization-wide
+and, when tested, incorrectly blocked a completely unrelated, legitimate later
+procurement request just because the same organization had an old unrelated flag; a
+real ministry legitimately raises many unrelated requests across different programs,
+and freezing all of them over one old flag would be a disproportionate, easily
+weaponized-as-a-denial-of-service side effect, not a meaningful control.
+
+**Duplicate-payment detection (item 3, post-launch)** — explicitly deferred back in
+Phase 8 ("no `Invoice` entity exists yet"), now built now that Invoice/PurchaseOrder
+(Phase 9) exist. `Invoice.invoiceNumber` is already `@unique` at the database level, so
+the naive fraud pattern — the identical invoice number submitted twice — was already
+structurally impossible before this work. Two real, distinct controls instead:
+
+- **Preventive (`no-over-invoicing`)**: a purchase order's cumulative invoiced amount
+  (excluding REJECTED invoices) can never exceed its authorized amount — enforced
+  directly in `InvoicesService.create()`, the domain service that owns the invariant,
+  same pattern as budget/allocation's "cannot commit beyond available balance". This
+  incidentally also closes the simplest duplicate-payment case outright: resubmitting
+  a full-amount invoice a second time almost always breaches the ceiling on its own.
+- **Detective (`duplicate-payment-detection`, `DuplicatePaymentDetector`)**: for the
+  case the ceiling can't catch (a purchase order large enough that two
+  identical-amount invoices both fit under it, or the same amount billed against two
+  *different* purchase orders — possibly the same physical delivery billed twice under
+  two authorizations), the same supplier submitting another invoice at the identical
+  amount within a configurable window (`RISK_DUPLICATE_PAYMENT_WINDOW_DAYS`, default 90
+  days) raises a risk alert — HIGH severity if against the same purchase order, MEDIUM
+  if a different one — for independent human review. Pure detection, consistent with
+  the risk engine's own stated invariant (see RiskAlertsService's doc comment): the
+  engine itself has no code path that can block anything, only ever raises an alert.
 
 ## Immutable Audit (Phase 3 — implemented)
 
@@ -747,11 +863,14 @@ Whistleblower Portal above for the full account.
 
 Not yet implemented (tracked in IMPLEMENTATION_PLAN.md against their owning phase):
 ABAC, a real permissioned-blockchain adapter (Hyperledger Fabric/Besu — only the
-development ledger simulation exists), business-action digital signatures
-(tender/bid/award/payment — the signing primitive exists and is proven, just not yet
-called from those not-yet-built modules), duplicate-invoice detection (the `Invoice`
-entity now exists, but Phase 8's detector suite hasn't been extended to it yet),
-supplier compliance documents still remain hash-only (the object storage backend
+development ledger simulation exists), business-action digital signatures for
+tender/bid/award (per-official signing now exists post-launch and is wired to
+`POST /budgets/:id/approve` — extending it to more endpoints is a mechanical repeat of
+the same pattern, not a new capability). Duplicate-invoice detection is now
+implemented (`DuplicatePaymentDetector`, post-launch — see § Legal & Policy
+Integration Layer), including a hard preventive ceiling (a purchase order's cumulative
+invoiced amount cannot exceed its authorized amount) that closes the simplest form of
+this fraud outright. Supplier compliance documents still remain hash-only (the object storage backend
 built in Phase 10 was scoped to project evidence; extending it to supplier documents
 is a straightforward follow-up, not a new capability), row-level security, step-up
 authentication, login-anomaly detection, API key issuance, a configurable policy

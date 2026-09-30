@@ -21,6 +21,7 @@ import { ContractsModule } from './modules/contracts/contracts.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { TransparencyModule } from './modules/transparency/transparency.module';
 import { WhistleblowerModule } from './modules/whistleblower/whistleblower.module';
+import { ComplianceModule } from './modules/compliance/compliance.module';
 
 @Module({
   imports: [
@@ -99,6 +100,7 @@ import { WhistleblowerModule } from './modules/whistleblower/whistleblower.modul
     ProjectsModule,
     TransparencyModule,
     WhistleblowerModule,
+    ComplianceModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

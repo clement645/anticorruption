@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useBudgetStore } from '../stores/budget'
+import { useSigningKeyStore } from '../stores/signingKey'
 import { apiGet } from '../api/client'
 
 interface Organization {
@@ -11,6 +12,7 @@ interface Organization {
 
 const auth = useAuthStore()
 const budget = useBudgetStore()
+const signingKey = useSigningKeyStore()
 
 const organizations = ref<Organization[]>([])
 
@@ -79,6 +81,24 @@ function commitFormFor(allocationId: string) {
   return commitForm[allocationId]
 }
 
+async function handleApprove(budgetId: string) {
+  formError.value = null
+  if (!auth.user) return
+  try {
+    const signedFields = signingKey.signRequest(
+      auth.user.sub,
+      'POST',
+      `/api/v1/budgets/${budgetId}/approve`,
+    )
+    await budget.approveBudget(budgetId, signedFields)
+  } catch (err) {
+    formError.value =
+      err instanceof Error && err.message.includes('No signing key')
+        ? 'Approving a budget requires a signing key — set one up under your account menu → Signing key.'
+        : 'Unable to approve budget'
+  }
+}
+
 async function handleCommit(allocationId: string) {
   const form = commitFormFor(allocationId)
   try {
@@ -93,24 +113,22 @@ async function handleCommit(allocationId: string) {
 
 <template>
   <section class="mx-auto max-w-5xl px-4 py-10">
-    <h1 class="text-2xl font-semibold text-slate-900">Budget Management</h1>
-    <p class="mt-1 text-sm text-slate-600">
-      Fiscal years, budgets, allocations, and commitment-control spending.
-    </p>
+    <div class="page-header">
+      <h1 class="page-title">Budget Management</h1>
+      <p class="page-subtitle">
+        Fiscal years, budgets, allocations, and commitment-control spending.
+      </p>
+    </div>
 
-    <p v-if="formError" class="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+    <p v-if="formError" class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
       {{ formError }}
     </p>
 
     <!-- Fiscal Years -->
-    <div class="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 class="text-sm font-medium text-slate-900">Fiscal Years</h2>
+    <div class="mt-6 card p-6">
+      <h2 class="section-title">Fiscal Years</h2>
       <div class="mt-3 flex flex-wrap gap-2">
-        <span
-          v-for="fy in budget.fiscalYears"
-          :key="fy.id"
-          class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700"
-        >
+        <span v-for="fy in budget.fiscalYears" :key="fy.id" class="badge badge-neutral">
           {{ fy.name }} ({{ fy.status }})
         </span>
         <span v-if="budget.fiscalYears.length === 0" class="text-xs text-slate-500">None yet.</span>
@@ -122,37 +140,35 @@ async function handleCommit(allocationId: string) {
         @submit.prevent="handleCreateFiscalYear"
       >
         <div>
-          <label class="block text-xs text-slate-500">Name</label>
-          <input v-model="newFiscalYear.name" required placeholder="2027/2028" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
+          <label class="field-label">Name</label>
+          <input v-model="newFiscalYear.name" required placeholder="2027/2028" class="input mt-1" />
         </div>
         <div>
-          <label class="block text-xs text-slate-500">Start</label>
-          <input v-model="newFiscalYear.startDate" type="date" required class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
+          <label class="field-label">Start</label>
+          <input v-model="newFiscalYear.startDate" type="date" required class="input mt-1" />
         </div>
         <div>
-          <label class="block text-xs text-slate-500">End</label>
-          <input v-model="newFiscalYear.endDate" type="date" required class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
+          <label class="field-label">End</label>
+          <input v-model="newFiscalYear.endDate" type="date" required class="input mt-1" />
         </div>
-        <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
-          Add fiscal year
-        </button>
+        <button type="submit" class="btn btn-primary btn-sm">Add fiscal year</button>
       </form>
     </div>
 
     <!-- Create Budget -->
-    <div v-if="auth.hasPermission('budget:create')" class="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 class="text-sm font-medium text-slate-900">New Budget</h2>
+    <div v-if="auth.hasPermission('budget:create')" class="mt-6 card p-6">
+      <h2 class="section-title">New Budget</h2>
       <form class="mt-3 space-y-3" @submit.prevent="handleCreateBudget">
         <div class="flex flex-wrap gap-2">
-          <select v-model="newBudget.fiscalYearId" required class="rounded-md border border-slate-300 px-2 py-1 text-sm">
+          <select v-model="newBudget.fiscalYearId" required class="select w-auto">
             <option value="" disabled>Fiscal year</option>
             <option v-for="fy in budget.fiscalYears" :key="fy.id" :value="fy.id">{{ fy.name }}</option>
           </select>
-          <select v-model="newBudget.organizationId" required class="rounded-md border border-slate-300 px-2 py-1 text-sm">
+          <select v-model="newBudget.organizationId" required class="select w-auto">
             <option value="" disabled>Organization</option>
             <option v-for="org in organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
           </select>
-          <input v-model="newBudget.name" required placeholder="Budget name" class="flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm" />
+          <input v-model="newBudget.name" required placeholder="Budget name" class="input flex-1" />
         </div>
 
         <table class="w-full text-xs">
@@ -169,19 +185,19 @@ async function handleCommit(allocationId: string) {
           </thead>
           <tbody>
             <tr v-for="(line, i) in newBudget.lines" :key="i">
-              <td class="pr-2 py-1"><input v-model="line.code" required class="w-20 rounded border border-slate-300 px-1 py-0.5" /></td>
-              <td class="pr-2 py-1"><input v-model="line.voteCode" required class="w-16 rounded border border-slate-300 px-1 py-0.5" /></td>
-              <td class="pr-2 py-1"><input v-model="line.voteName" required class="w-24 rounded border border-slate-300 px-1 py-0.5" /></td>
-              <td class="pr-2 py-1"><input v-model="line.programName" required class="w-24 rounded border border-slate-300 px-1 py-0.5" /></td>
-              <td class="pr-2 py-1"><input v-model="line.description" required class="w-32 rounded border border-slate-300 px-1 py-0.5" /></td>
+              <td class="pr-2 py-1"><input v-model="line.code" required class="input w-20 px-1.5 py-1 text-xs" /></td>
+              <td class="pr-2 py-1"><input v-model="line.voteCode" required class="input w-16 px-1.5 py-1 text-xs" /></td>
+              <td class="pr-2 py-1"><input v-model="line.voteName" required class="input w-24 px-1.5 py-1 text-xs" /></td>
+              <td class="pr-2 py-1"><input v-model="line.programName" required class="input w-24 px-1.5 py-1 text-xs" /></td>
+              <td class="pr-2 py-1"><input v-model="line.description" required class="input w-32 px-1.5 py-1 text-xs" /></td>
               <td class="pr-2 py-1">
-                <input v-model.number="line.authorizedAmount" type="number" min="1" required class="w-24 rounded border border-slate-300 px-1 py-0.5" />
+                <input v-model.number="line.authorizedAmount" type="number" min="1" required class="input w-24 px-1.5 py-1 text-xs" />
               </td>
               <td class="py-1">
                 <button
                   v-if="newBudget.lines.length > 1"
                   type="button"
-                  class="text-red-600"
+                  class="btn btn-ghost btn-sm text-red-600"
                   @click="removeLine(i)"
                 >
                   &times;
@@ -190,50 +206,60 @@ async function handleCommit(allocationId: string) {
             </tr>
           </tbody>
         </table>
-        <button type="button" class="text-xs text-slate-600 underline" @click="addLine">+ Add line</button>
+        <button type="button" class="btn btn-ghost btn-sm" @click="addLine">+ Add line</button>
 
         <div>
-          <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
-            Create budget
-          </button>
+          <button type="submit" class="btn btn-primary">Create budget</button>
         </div>
       </form>
     </div>
 
     <!-- Budgets list -->
-    <div class="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-      <table class="min-w-full divide-y divide-slate-200 text-sm">
-        <thead class="bg-slate-50">
+    <div class="mt-6 table-shell">
+      <table class="table-base">
+        <thead>
           <tr>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Name</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Status</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Total Authorized</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Lines</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Actions</th>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Total Authorized</th>
+            <th>Lines</th>
+            <th>Actions</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-slate-100">
+        <tbody>
           <tr v-if="budget.budgets.length === 0">
-            <td colspan="5" class="px-4 py-6 text-center text-slate-500">No budgets yet.</td>
+            <td colspan="5" class="text-center text-slate-500">No budgets yet.</td>
           </tr>
           <tr v-for="b in budget.budgets" :key="b.id">
-            <td class="px-4 py-2 font-medium text-slate-900">{{ b.name }}</td>
-            <td class="px-4 py-2 text-slate-600">{{ b.status }}</td>
-            <td class="px-4 py-2 text-slate-600">{{ b.totalAuthorizedAmount }}</td>
-            <td class="px-4 py-2 text-slate-600">{{ b.lines.length }}</td>
-            <td class="px-4 py-2">
+            <td class="font-medium text-slate-900">{{ b.name }}</td>
+            <td>
+              <span
+                class="badge"
+                :class="{
+                  'badge-neutral': b.status === 'DRAFT',
+                  'badge-warning': b.status === 'PENDING_APPROVAL',
+                  'badge-success': b.status === 'APPROVED' || b.status === 'ACTIVE',
+                  'badge-danger': b.status === 'REJECTED',
+                }"
+              >
+                {{ b.status }}
+              </span>
+            </td>
+            <td>{{ b.totalAuthorizedAmount }}</td>
+            <td>{{ b.lines.length }}</td>
+            <td>
               <button
                 v-if="b.status === 'DRAFT' && auth.hasPermission('budget:create')"
-                class="mr-2 text-xs text-slate-700 underline"
+                class="btn btn-ghost btn-sm"
                 @click="budget.submitBudget(b.id)"
               >
                 Submit
               </button>
               <template v-if="b.status === 'PENDING_APPROVAL' && auth.hasPermission('budget:approve')">
-                <button class="mr-2 text-xs text-emerald-700 underline" @click="budget.approveBudget(b.id)">
+                <button class="btn btn-ghost btn-sm text-emerald-700" @click="handleApprove(b.id)">
                   Approve
                 </button>
-                <button class="text-xs text-red-700 underline" @click="budget.rejectBudget(b.id)">Reject</button>
+                <button class="btn btn-ghost btn-sm text-red-700" @click="budget.rejectBudget(b.id)">Reject</button>
               </template>
             </td>
           </tr>
@@ -242,51 +268,43 @@ async function handleCommit(allocationId: string) {
     </div>
 
     <!-- Allocations -->
-    <div class="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-      <table class="min-w-full divide-y divide-slate-200 text-sm">
-        <thead class="bg-slate-50">
+    <div class="mt-6 table-shell">
+      <table class="table-base">
+        <thead>
           <tr>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Reference</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Authorized</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Committed</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Spent</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Available</th>
-            <th v-if="auth.hasPermission('budget:commit')" class="px-4 py-2 text-left font-medium text-slate-500">
-              Commit
-            </th>
+            <th>Reference</th>
+            <th>Authorized</th>
+            <th>Committed</th>
+            <th>Spent</th>
+            <th>Available</th>
+            <th v-if="auth.hasPermission('budget:commit')">Commit</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-slate-100">
+        <tbody>
           <tr v-if="budget.allocations.length === 0">
-            <td colspan="6" class="px-4 py-6 text-center text-slate-500">No allocations yet.</td>
+            <td colspan="6" class="text-center text-slate-500">No allocations yet.</td>
           </tr>
           <tr v-for="a in budget.allocations" :key="a.id">
-            <td class="px-4 py-2 text-slate-600">{{ a.authorizationReference }}</td>
-            <td class="px-4 py-2 text-slate-600">{{ a.authorizedAmount }}</td>
-            <td class="px-4 py-2 text-slate-600">{{ a.committedAmount }}</td>
-            <td class="px-4 py-2 text-slate-600">{{ a.spentAmount }}</td>
-            <td class="px-4 py-2 font-medium text-slate-900">{{ a.availableAmount }}</td>
-            <td v-if="auth.hasPermission('budget:commit')" class="px-4 py-2">
+            <td>{{ a.authorizationReference }}</td>
+            <td>{{ a.authorizedAmount }}</td>
+            <td>{{ a.committedAmount }}</td>
+            <td>{{ a.spentAmount }}</td>
+            <td class="font-medium text-slate-900">{{ a.availableAmount }}</td>
+            <td v-if="auth.hasPermission('budget:commit')">
               <div class="flex items-center gap-1">
                 <input
                   v-model.number="commitFormFor(a.id).amount"
                   type="number"
                   min="1"
                   placeholder="Amount"
-                  class="w-20 rounded border border-slate-300 px-1 py-0.5 text-xs"
+                  class="input w-20 px-1.5 py-1 text-xs"
                 />
                 <input
                   v-model="commitFormFor(a.id).description"
                   placeholder="Description"
-                  class="w-28 rounded border border-slate-300 px-1 py-0.5 text-xs"
+                  class="input w-28 px-1.5 py-1 text-xs"
                 />
-                <button
-                  type="button"
-                  class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50"
-                  @click="handleCommit(a.id)"
-                >
-                  Commit
-                </button>
+                <button type="button" class="btn btn-secondary btn-sm" @click="handleCommit(a.id)">Commit</button>
               </div>
             </td>
           </tr>

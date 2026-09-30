@@ -26,18 +26,20 @@ async function handleAnchorNow() {
 
 <template>
   <section class="mx-auto max-w-5xl px-4 py-10">
-    <h1 class="text-2xl font-semibold text-slate-900">Audit Trail</h1>
-    <p class="mt-1 text-sm text-slate-600">
-      Append-only, hash-chained, digitally signed record of significant actions.
-    </p>
+    <div class="page-header">
+      <h1 class="page-title">Audit Trail</h1>
+      <p class="page-subtitle">
+        Append-only, hash-chained, digitally signed record of significant actions.
+      </p>
+    </div>
 
     <div class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-      <div class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+      <div class="card p-6">
         <div class="flex items-center justify-between">
-          <h2 class="text-sm font-medium text-slate-900">Chain Integrity</h2>
+          <h2 class="section-title">Chain Integrity</h2>
           <button
             type="button"
-            class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            class="btn btn-secondary btn-sm"
             :disabled="audit.verifying"
             @click="audit.verifyChain()"
           >
@@ -72,13 +74,13 @@ async function handleAnchorNow() {
         </div>
       </div>
 
-      <div class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+      <div class="card p-6">
         <div class="flex items-center justify-between">
-          <h2 class="text-sm font-medium text-slate-900">Blockchain Integrity Layer</h2>
+          <h2 class="section-title">Blockchain Integrity Layer</h2>
           <button
             v-if="auth.hasPermission('blockchain:anchor')"
             type="button"
-            class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            class="btn btn-secondary btn-sm"
             :disabled="blockchain.anchoring"
             @click="handleAnchorNow"
           >
@@ -109,40 +111,40 @@ async function handleAnchorNow() {
       </div>
     </div>
 
-    <div class="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-      <table class="min-w-full divide-y divide-slate-200 text-sm">
-        <thead class="bg-slate-50">
+    <div class="mt-6 table-shell">
+      <table class="table-base">
+        <thead>
           <tr>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Seq</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Event</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Actor</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Resource</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">Anchored</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-500">When</th>
+            <th>Seq</th>
+            <th>Event</th>
+            <th>Actor</th>
+            <th>Resource</th>
+            <th>Anchored</th>
+            <th>When</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-slate-100">
+        <tbody>
           <tr v-if="audit.loading">
-            <td colspan="6" class="px-4 py-6 text-center text-slate-500">Loading…</td>
+            <td colspan="6" class="text-center text-slate-500">Loading…</td>
           </tr>
           <tr v-else-if="audit.error">
-            <td colspan="6" class="px-4 py-6 text-center text-red-700">{{ audit.error }}</td>
+            <td colspan="6" class="text-center text-red-700">{{ audit.error }}</td>
           </tr>
           <tr v-else-if="audit.events.length === 0">
-            <td colspan="6" class="px-4 py-6 text-center text-slate-500">No audit events yet.</td>
+            <td colspan="6" class="text-center text-slate-500">No audit events yet.</td>
           </tr>
           <tr v-for="event in audit.events" :key="event.id">
-            <td class="px-4 py-2 text-slate-500">{{ event.sequence }}</td>
-            <td class="px-4 py-2 font-medium text-slate-900">
+            <td class="text-slate-500">{{ event.sequence }}</td>
+            <td class="font-medium text-slate-900">
               {{ formatEventType(event.eventType) }}
             </td>
-            <td class="px-4 py-2 text-slate-600">{{ event.actorEmail ?? '—' }}</td>
-            <td class="px-4 py-2 text-slate-600">
+            <td class="text-slate-600">{{ event.actorEmail ?? '—' }}</td>
+            <td class="text-slate-600">
               {{ event.resourceType ?? '—' }}<template v-if="event.resourceId"
                 >&nbsp;({{ event.resourceId.slice(0, 8) }}…)</template
               >
             </td>
-            <td class="px-4 py-2">
+            <td>
               <span
                 class="inline-block h-2 w-2 rounded-full"
                 :class="event.blockchainTxRef ? 'bg-emerald-500' : 'bg-slate-300'"
@@ -150,7 +152,7 @@ async function handleAnchorNow() {
                 aria-hidden="true"
               />
             </td>
-            <td class="px-4 py-2 text-slate-500">{{ new Date(event.createdAt).toLocaleString() }}</td>
+            <td class="text-slate-500">{{ new Date(event.createdAt).toLocaleString() }}</td>
           </tr>
         </tbody>
       </table>

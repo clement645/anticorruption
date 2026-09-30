@@ -44,10 +44,21 @@ describe('IAM (e2e)', () => {
 
   const testEmailReader = 'e2e-reader@test.bpfmps.local';
   const testEmailNoPerms = 'e2e-noperms@test.bpfmps.local';
+  const testEmailAdmin = 'e2e-admin@test.bpfmps.local';
+  // Dedicated no-permissions account for the admin-endpoint 403 checks below —
+  // testEmailNoPerms gets deliberately locked out by the lockout test earlier
+  // in this file, so reusing it here would make those later logins fail with
+  // 403 (locked) rather than the 403 (forbidden) the test is actually checking.
+  const testEmailNoPermsAdmin = 'e2e-noperms-admin@test.bpfmps.local';
   const password = 'E2ETestPassword123!';
 
   let readerUserId: string;
   let noPermsUserId: string;
+  let noPermsAdminUserId: string;
+  let adminUserId: string;
+  let targetRoleAId: string;
+  let targetRoleBId: string;
+  const createdUserIds: string[] = [];
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -128,25 +139,124 @@ describe('IAM (e2e)', () => {
       },
     });
     noPermsUserId = noPerms.id;
+
+    const noPermsAdmin = await prisma.user.upsert({
+      where: { email: testEmailNoPermsAdmin },
+      create: {
+        email: testEmailNoPermsAdmin,
+        firstName: '[E2E]',
+        lastName: 'NoPermsAdmin',
+        passwordHash,
+        status: 'ACTIVE',
+      },
+      update: {
+        passwordHash,
+        status: 'ACTIVE',
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+    noPermsAdminUserId = noPermsAdmin.id;
+
+    const adminRole = await prisma.role.upsert({
+      where: { name: '[E2E] Users Admin' },
+      create: { name: '[E2E] Users Admin' },
+      update: {},
+    });
+    for (const action of ['read', 'create', 'update']) {
+      const perm = await prisma.permission.upsert({
+        where: { resource_action: { resource: 'users', action } },
+        create: { resource: 'users', action, description: action },
+        update: {},
+      });
+      await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionId: { roleId: adminRole.id, permissionId: perm.id },
+        },
+        create: { roleId: adminRole.id, permissionId: perm.id },
+        update: {},
+      });
+    }
+
+    const admin = await prisma.user.upsert({
+      where: { email: testEmailAdmin },
+      create: {
+        email: testEmailAdmin,
+        firstName: '[E2E]',
+        lastName: 'Admin',
+        passwordHash,
+        status: 'ACTIVE',
+        roles: { create: { roleId: adminRole.id } },
+      },
+      update: {
+        passwordHash,
+        status: 'ACTIVE',
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+    adminUserId = admin.id;
+
+    const targetRoleA = await prisma.role.upsert({
+      where: { name: '[E2E] Target Role A' },
+      create: { name: '[E2E] Target Role A' },
+      update: {},
+    });
+    targetRoleAId = targetRoleA.id;
+    const targetRoleB = await prisma.role.upsert({
+      where: { name: '[E2E] Target Role B' },
+      create: { name: '[E2E] Target Role B' },
+      update: {},
+    });
+    targetRoleBId = targetRoleB.id;
   });
 
   afterAll(async () => {
+    const allUserIds = [
+      readerUserId,
+      noPermsUserId,
+      noPermsAdminUserId,
+      adminUserId,
+      ...createdUserIds,
+    ].filter((id): id is string => Boolean(id));
     await prisma.session.deleteMany({
-      where: { userId: { in: [readerUserId, noPermsUserId] } },
+      where: { userId: { in: allUserIds } },
     });
     await prisma.userRole.deleteMany({
-      where: { userId: { in: [readerUserId, noPermsUserId] } },
+      where: { userId: { in: allUserIds } },
     });
     await prisma.securityEvent.deleteMany({
-      where: { userId: { in: [readerUserId, noPermsUserId] } },
+      where: { userId: { in: allUserIds } },
     });
     await prisma.user.deleteMany({
-      where: { id: { in: [readerUserId, noPermsUserId] } },
+      where: { id: { in: allUserIds } },
     });
     await prisma.rolePermission.deleteMany({
-      where: { role: { name: '[E2E] Users Reader' } },
+      where: {
+        role: {
+          name: {
+            in: [
+              '[E2E] Users Reader',
+              '[E2E] Users Admin',
+              '[E2E] Target Role A',
+              '[E2E] Target Role B',
+            ],
+          },
+        },
+      },
     });
-    await prisma.role.deleteMany({ where: { name: '[E2E] Users Reader' } });
+    await prisma.role.deleteMany({
+      where: {
+        name: {
+          in: [
+            '[E2E] Users Reader',
+            '[E2E] Users Admin',
+            '[E2E] Target Role A',
+            '[E2E] Target Role B',
+          ],
+        },
+      },
+    });
     await app.close();
   });
 
@@ -254,5 +364,142 @@ describe('IAM (e2e)', () => {
       .expect(403);
 
     expect((response.body as ErrorResponseBody).message).toMatch(/locked/i);
+  });
+
+  describe('admin user management (users:create / users:update)', () => {
+    async function loginAsAdmin() {
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: testEmailAdmin, password })
+        .expect(200);
+      return (login.body as LoginResponseBody).accessToken;
+    }
+
+    it('rejects user creation from an actor without users:create', async () => {
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: testEmailNoPermsAdmin, password })
+        .expect(200);
+      const token = (login.body as LoginResponseBody).accessToken;
+
+      await request(app.getHttpServer())
+        .post('/api/v1/users')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          email: 'e2e-blocked@test.bpfmps.local',
+          firstName: 'Blocked',
+          lastName: 'User',
+          temporaryPassword: 'SomeTempPassword123!',
+          roleIds: [targetRoleAId],
+        })
+        .expect(403);
+    });
+
+    it('allows an admin to create a user with an assigned role', async () => {
+      const token = await loginAsAdmin();
+
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/users')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          email: 'e2e-created@test.bpfmps.local',
+          firstName: 'Created',
+          lastName: 'User',
+          temporaryPassword: 'SomeTempPassword123!',
+          roleIds: [targetRoleAId],
+        })
+        .expect(201);
+
+      const created = response.body as { id: string; email: string };
+      expect(created.email).toEqual('e2e-created@test.bpfmps.local');
+      createdUserIds.push(created.id);
+
+      const list = await request(app.getHttpServer())
+        .get('/api/v1/users')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const listBody = list.body as {
+        items: Array<{ id: string; roles: Array<{ id: string }> }>;
+      };
+      const found = listBody.items.find((u) => u.id === created.id);
+      expect(found?.roles.map((r) => r.id)).toEqual([targetRoleAId]);
+    });
+
+    it('rejects a duplicate email with 409', async () => {
+      const token = await loginAsAdmin();
+
+      await request(app.getHttpServer())
+        .post('/api/v1/users')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          email: 'e2e-created@test.bpfmps.local',
+          firstName: 'Dupe',
+          lastName: 'User',
+          temporaryPassword: 'SomeTempPassword123!',
+          roleIds: [targetRoleAId],
+        })
+        .expect(409);
+    });
+
+    it('rejects update from an actor without users:update', async () => {
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: testEmailNoPermsAdmin, password })
+        .expect(200);
+      const token = (login.body as LoginResponseBody).accessToken;
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/users/${readerUserId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ status: 'SUSPENDED' })
+        .expect(403);
+    });
+
+    it("allows an admin to replace a user's roles entirely", async () => {
+      const token = await loginAsAdmin();
+      const targetId = createdUserIds[0];
+
+      const response = await request(app.getHttpServer())
+        .patch(`/api/v1/users/${targetId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ roleIds: [targetRoleBId] })
+        .expect(200);
+
+      const updated = response.body as { roles: Array<{ id: string }> };
+      expect(updated.roles.map((r) => r.id)).toEqual([targetRoleBId]);
+    });
+
+    it('allows an admin to suspend another user', async () => {
+      const token = await loginAsAdmin();
+      const targetId = createdUserIds[0];
+
+      const response = await request(app.getHttpServer())
+        .patch(`/api/v1/users/${targetId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ status: 'SUSPENDED' })
+        .expect(200);
+
+      expect((response.body as { status: string }).status).toEqual('SUSPENDED');
+    });
+
+    it('blocks an admin from changing their own account status', async () => {
+      const token = await loginAsAdmin();
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/users/${adminUserId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ status: 'SUSPENDED' })
+        .expect(403);
+    });
+
+    it('returns 404 when updating a non-existent user', async () => {
+      const token = await loginAsAdmin();
+
+      await request(app.getHttpServer())
+        .patch('/api/v1/users/00000000-0000-4000-8000-000000000000')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ status: 'SUSPENDED' })
+        .expect(404);
+    });
   });
 });

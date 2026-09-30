@@ -624,9 +624,11 @@ full account of both). Stress-tested across 11 total full-suite runs (6 accumula
 IMPLEMENTATION_PLAN.md Phase 8 and `blockchain.e2e-spec.ts`).
 
 **Residual risk:**
-1. **Not yet addressed:** duplicate-invoice detection — no `Invoice` entity exists
-   yet (Phase 9). Building a stub detector against nonexistent data was rejected as
-   dishonest scaffolding; this is an explicit, documented gap, not a silent omission.
+1. **Addressed post-launch** (item 3 of the "highest impact first" sequence):
+   duplicate-invoice/duplicate-payment detection, once `Invoice` (Phase 9) existed to
+   detect against. See SECURITY.md § Legal & Policy Integration Layer for the two
+   controls added — a hard preventive purchase-order invoicing ceiling plus a
+   detective same-amount-resubmission detector.
 2. **Not yet addressed:** all thresholds are static and disclosed in source
    (`risk.constants.ts`, `env.validation.ts`) — a sophisticated actor could shape
    behavior to stay just inside them (see Attack surface above). No adaptive or
@@ -715,9 +717,9 @@ stability runs (6 accumulated + 5 fresh-truncate) across all 9 spec files, match
 the methodology adopted after Phases 3–4's real bugs.
 
 **Residual risk:**
-1. **Not yet addressed:** duplicate-invoice detection — Phase 8's AI Risk Engine has
-   not been extended to look at the now-real `Invoice` entity. The data exists; the
-   detector doesn't yet.
+1. **Addressed post-launch**: `DuplicatePaymentDetector` now looks at the `Invoice`
+   entity directly, plus a hard preventive ceiling on a purchase order's cumulative
+   invoiced amount — see SECURITY.md § Legal & Policy Integration Layer.
 2. **Not yet addressed:** no partial-commitment tracking when multiple contracts
    share one originating budget commitment (a multi-lot tender can produce several
    awards, several contracts, all tracing to the same `ProcurementRequest`). Only the

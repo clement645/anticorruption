@@ -101,8 +101,11 @@ export const useBudgetStore = defineStore('budget', {
       await this.fetchBudgets()
     },
 
-    async approveBudget(id: string) {
-      await apiPost(`/budgets/${id}/approve`)
+    async approveBudget(
+      id: string,
+      signedFields: { signature: string; signatureTimestamp: string; signatureNonce: string },
+    ) {
+      await apiPost(`/budgets/${id}/approve`, signedFields)
       await this.fetchBudgets()
     },
 

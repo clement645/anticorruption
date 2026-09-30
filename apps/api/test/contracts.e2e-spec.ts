@@ -4,8 +4,10 @@ import cookieParser from 'cookie-parser';
 import * as argon2 from 'argon2';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { generateEd25519KeyPair } from '@bpfmps/crypto';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { signRequest } from './helpers/signing';
 
 interface LoginResponseBody {
   accessToken: string;
@@ -77,6 +79,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
   let approver3UserId: string;
   let noPermUserId: string;
   let fullToken: string;
+  let fullPrivateKeyPem: string;
   let approver1Token: string;
   let approver2Token: string;
   let approver3Token: string;
@@ -166,6 +169,8 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       ['payment', 'read'],
       ['payment', 'execute'],
       ['payment', 'reconcile'],
+      ['risk', 'read'],
+      ['risk', 'review'],
     ]);
 
     // A role with ONLY payment:approve/read — used by three distinct users
@@ -246,6 +251,15 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
     }
 
     fullToken = await login(fullEmail);
+
+    const fullKeyPair = generateEd25519KeyPair();
+    fullPrivateKeyPem = fullKeyPair.privateKeyPem;
+    await request(app.getHttpServer())
+      .post('/api/v1/users/me/signing-key')
+      .set('Authorization', `Bearer ${fullToken}`)
+      .send({ publicKeyPem: fullKeyPair.publicKeyPem })
+      .expect(201);
+
     approver1Token = await login(approver1Email);
     approver2Token = await login(approver2Email);
     approver3Token = await login(approver3Email);
@@ -289,6 +303,13 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/approve`)
       .set('Authorization', `Bearer ${fullToken}`)
+      .send(
+        signRequest(
+          'POST',
+          `/api/v1/budgets/${budgetId}/approve`,
+          fullPrivateKeyPem,
+        ),
+      )
       .expect(200);
     const allocations = await request(app.getHttpServer())
       .get('/api/v1/allocations')
@@ -638,6 +659,143 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .post(`/api/v1/invoices/${invoiceId}/verify`)
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(400);
+  });
+
+  it("rejects an invoice that would push a purchase order's cumulative total past its authorized amount", async () => {
+    const awardId = await createAward(500_000);
+    const contract = await request(app.getHttpServer())
+      .post('/api/v1/contracts')
+      .set('Authorization', `Bearer ${fullToken}`)
+      .send({
+        awardId,
+        contractNumber: `E2E-CTR-CEILING-${Date.now()}-${Math.random()}`,
+        title: 'E2E Over-Invoicing Ceiling',
+        value: 500_000,
+        startDate: '2027-10-01',
+        endDate: '2028-06-30',
+      })
+      .expect(201);
+    const contractId = (contract.body as ContractBody).id;
+    await request(app.getHttpServer())
+      .post(`/api/v1/contracts/${contractId}/activate`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
+
+    const po = await request(app.getHttpServer())
+      .post(`/api/v1/contracts/${contractId}/purchase-orders`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .send({
+        poNumber: `E2E-PO-CEILING-${Date.now()}-${Math.random()}`,
+        description: 'Ceiling test',
+        amount: 500_000,
+      })
+      .expect(201);
+    const poId = (po.body as PurchaseOrderBody).id;
+    await request(app.getHttpServer())
+      .post(`/api/v1/purchase-orders/${poId}/issue`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/purchase-orders/${poId}/invoices`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .send({
+        invoiceNumber: `E2E-INV-CEILING-A-${Date.now()}`,
+        amount: 300_000,
+        items: [{ description: 'x', quantity: 1, unitPrice: 300_000, amount: 300_000 }],
+      })
+      .expect(201);
+
+    // 300,000 + 300,000 = 600,000 > the PO's 500,000 ceiling.
+    await request(app.getHttpServer())
+      .post(`/api/v1/purchase-orders/${poId}/invoices`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .send({
+        invoiceNumber: `E2E-INV-CEILING-B-${Date.now()}`,
+        amount: 300_000,
+        items: [{ description: 'x', quantity: 1, unitPrice: 300_000, amount: 300_000 }],
+      })
+      .expect(409);
+
+    // Exactly filling the remaining 200,000 headroom is fine.
+    await request(app.getHttpServer())
+      .post(`/api/v1/purchase-orders/${poId}/invoices`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .send({
+        invoiceNumber: `E2E-INV-CEILING-C-${Date.now()}`,
+        amount: 200_000,
+        items: [{ description: 'x', quantity: 1, unitPrice: 200_000, amount: 200_000 }],
+      })
+      .expect(201);
+  });
+
+  it('flags a same-amount invoice resubmitted against the same purchase order as a possible duplicate payment', async () => {
+    const awardId = await createAward(1_000_000);
+    const contract = await request(app.getHttpServer())
+      .post('/api/v1/contracts')
+      .set('Authorization', `Bearer ${fullToken}`)
+      .send({
+        awardId,
+        contractNumber: `E2E-CTR-DUPE-${Date.now()}-${Math.random()}`,
+        title: 'E2E Duplicate Payment',
+        value: 1_000_000,
+        startDate: '2027-10-01',
+        endDate: '2028-06-30',
+      })
+      .expect(201);
+    const contractId = (contract.body as ContractBody).id;
+    await request(app.getHttpServer())
+      .post(`/api/v1/contracts/${contractId}/activate`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
+
+    const po = await request(app.getHttpServer())
+      .post(`/api/v1/contracts/${contractId}/purchase-orders`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .send({
+        poNumber: `E2E-PO-DUPE-${Date.now()}-${Math.random()}`,
+        description: 'Duplicate payment test',
+        amount: 1_000_000,
+      })
+      .expect(201);
+    const poId = (po.body as PurchaseOrderBody).id;
+    await request(app.getHttpServer())
+      .post(`/api/v1/purchase-orders/${poId}/issue`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/purchase-orders/${poId}/invoices`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .send({
+        invoiceNumber: `E2E-INV-DUPE-A-${Date.now()}`,
+        amount: 400_000,
+        items: [{ description: 'x', quantity: 1, unitPrice: 400_000, amount: 400_000 }],
+      })
+      .expect(201);
+
+    // Same PO, same supplier, identical amount, different invoice number —
+    // stays comfortably under the PO's 1,000,000 ceiling, so only the
+    // duplicate-payment DETECTOR (not the hard ceiling check) should react.
+    const secondInvoice = await request(app.getHttpServer())
+      .post(`/api/v1/purchase-orders/${poId}/invoices`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .send({
+        invoiceNumber: `E2E-INV-DUPE-B-${Date.now()}`,
+        amount: 400_000,
+        items: [{ description: 'x', quantity: 1, unitPrice: 400_000, amount: 400_000 }],
+      })
+      .expect(201);
+    const secondInvoiceId = (secondInvoice.body as InvoiceBody).id;
+
+    const alerts = await request(app.getHttpServer())
+      .get('/api/v1/risk-alerts')
+      .query({ detectorType: 'DUPLICATE_PAYMENT', resourceId: secondInvoiceId })
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
+    const alertList = alerts.body as Array<{ id: string; severity: string }>;
+    expect(alertList.length).toBeGreaterThanOrEqual(1);
+    expect(alertList[0].severity).toBe('HIGH');
   });
 
   it('prevents self-approval and duplicate approval by the same user', async () => {

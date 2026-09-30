@@ -1,9 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { RiskAlert } from '@bpfmps/database';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { RiskAlertsService } from './risk-alerts.service';
 import type { DetectionResult } from '../risk.types';
 import type { EnvConfig } from '../../../config/env.validation';
+
+/**
+ * Regulation 43 of the Public Procurement and Asset Disposal Regulations,
+ * 2020 (Legal Notice No. 69 of 2020) — "Procurement pricing and requirement
+ * not to split contracts". See apps/api/src/modules/compliance for the full
+ * citable rule registry this references.
+ */
+export const SPLIT_PROCUREMENT_CITATION =
+  'Public Procurement and Asset Disposal Regulations, 2020, Regulation 43 (requirement not to split contracts)';
 
 /**
  * Flags an organization that has raised several procurement requests in a
@@ -94,5 +104,43 @@ export class SplitProcurementDetector {
         error,
       );
     }
+  }
+
+  /**
+   * Preventive gate, not just detection: a request that is itself one of the
+   * requests named in an unresolved (OPEN or UNDER_REVIEW) HIGH-severity
+   * split-procurement alert cannot be approved until an independent Auditor
+   * reviews it (CONFIRMED or DISMISSED; `risk:review` is deliberately
+   * withheld from Procurement Officer, see Phase 8). Called by
+   * ProcurementRequestsService.approve() BEFORE the budget commitment is
+   * created — previously this detector only ran AFTER approval, by which
+   * point the money was already committed.
+   *
+   * Deliberately scoped to the SPECIFIC flagged batch (`evidence.requestIds`
+   * contains this request), not "this organization has any unresolved alert
+   * anywhere" — a real ministry legitimately raises many unrelated
+   * procurement requests across different programs; freezing all of an
+   * organization's future procurement over one old, unrelated flag would be
+   * a disproportionate, easily-gamed-as-a-denial-of-service side effect, not
+   * a meaningful anti-corruption control. Returns the blocking alert, or
+   * null if approval may proceed.
+   */
+  async findBlockingAlert(
+    organizationId: string,
+    requestId: string,
+  ): Promise<RiskAlert | null> {
+    return this.prisma.riskAlert.findFirst({
+      where: {
+        detectorType: 'SPLIT_PROCUREMENT',
+        severity: 'HIGH',
+        status: { in: ['OPEN', 'UNDER_REVIEW'] },
+        resourceType: 'ProcurementRequest',
+        AND: [
+          { evidence: { path: ['organizationId'], equals: organizationId } },
+          { evidence: { path: ['requestIds'], array_contains: requestId } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 }

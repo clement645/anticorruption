@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -11,7 +12,10 @@ import type {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { AllocationsService } from '../../budget/services/allocations.service';
-import { SplitProcurementDetector } from '../../risk/services/split-procurement.detector';
+import {
+  SplitProcurementDetector,
+  SPLIT_PROCUREMENT_CITATION,
+} from '../../risk/services/split-procurement.detector';
 import type { CreateRequestDto } from '../dto/create-request.dto';
 import type { ProcurementRequestView } from '../procurement.types';
 
@@ -183,6 +187,24 @@ export class ProcurementRequestsService {
     if (request.status !== 'SUBMITTED') {
       throw new BadRequestException(
         `Cannot approve a request in status ${request.status}`,
+      );
+    }
+
+    // Legal & policy integration layer (post-launch): a preventive gate, not
+    // just a post-hoc alert — see SplitProcurementDetector.findBlockingAlert.
+    // Checked before the commitment below so an organization with a live,
+    // unreviewed split-procurement red flag cannot have public money
+    // committed to it while that flag stands.
+    const blockingAlert = await this.splitProcurementDetector.findBlockingAlert(
+      request.organizationId,
+      request.id,
+    );
+    if (blockingAlert) {
+      throw new ConflictException(
+        `Approval blocked: this request is part of an unresolved HIGH-severity ` +
+          `split-procurement alert (${blockingAlert.id}). ${SPLIT_PROCUREMENT_CITATION}. ` +
+          `An Auditor or Internal Auditor must review it (risk:review) before ` +
+          `this request can be approved.`,
       );
     }
 

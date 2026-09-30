@@ -154,29 +154,29 @@ async function handleRecordRisk() {
   <section class="mx-auto max-w-4xl px-4 py-10">
     <router-link to="/procurement" class="text-xs text-slate-500 hover:text-slate-900">&larr; Back to Procurement</router-link>
 
-    <div v-if="supplier.error" class="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+    <div v-if="supplier.error" class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
       {{ supplier.error }}
     </div>
 
     <div v-if="supplier.profile" class="mt-2">
       <div class="flex items-center gap-3">
-        <h1 class="text-2xl font-semibold text-slate-900">{{ supplier.profile.name }}</h1>
+        <h1 class="page-title">{{ supplier.profile.name }}</h1>
         <span
-          class="rounded-full px-2 py-0.5 text-xs font-medium"
+          class="badge"
           :class="{
-            'bg-emerald-100 text-emerald-800': supplier.profile.status === 'ACTIVE',
-            'bg-amber-100 text-amber-800': supplier.profile.status === 'SUSPENDED',
-            'bg-red-100 text-red-800': supplier.profile.status === 'BLACKLISTED',
+            'badge-success': supplier.profile.status === 'ACTIVE',
+            'badge-warning': supplier.profile.status === 'SUSPENDED',
+            'badge-danger': supplier.profile.status === 'BLACKLISTED',
           }"
         >
           {{ supplier.profile.status }}
         </span>
       </div>
-      <p class="mt-1 text-sm text-slate-600">Registration No. {{ supplier.profile.registrationNumber }}</p>
+      <p class="mt-1 text-sm text-slate-500">Registration No. {{ supplier.profile.registrationNumber }}</p>
 
       <!-- Profile -->
-      <div class="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 class="text-sm font-medium text-slate-900">Profile</h2>
+      <div class="mt-6 card p-6">
+        <h2 class="section-title">Profile</h2>
         <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
           <dt class="text-slate-400">Business type</dt>
           <dd>{{ supplier.profile.businessType ?? '—' }}</dd>
@@ -194,7 +194,7 @@ async function handleRecordRisk() {
 
         <template v-if="canManage">
           <form class="mt-4 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3" @submit.prevent="handleUpdateProfile">
-            <select v-model="profileForm.businessType" class="rounded-md border border-slate-300 px-2 py-1 text-sm">
+            <select v-model="profileForm.businessType" class="select">
               <option value="">Business type…</option>
               <option value="SOLE_PROPRIETORSHIP">Sole proprietorship</option>
               <option value="PARTNERSHIP">Partnership</option>
@@ -203,34 +203,32 @@ async function handleRecordRisk() {
               <option value="NGO">NGO</option>
               <option value="OTHER">Other</option>
             </select>
-            <input v-model="profileForm.taxIdentifier" placeholder="Tax identifier (KRA PIN)" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
-            <input v-model="profileForm.county" placeholder="County" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
-            <input v-model="profileForm.physicalAddress" placeholder="Physical address" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
-            <input v-model="profileForm.contactPersonName" placeholder="Contact person" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
-            <input v-model="profileForm.email" placeholder="Email" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
-            <button type="submit" class="col-span-2 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
-              Save profile
-            </button>
+            <input v-model="profileForm.taxIdentifier" placeholder="Tax identifier (KRA PIN)" class="input" />
+            <input v-model="profileForm.county" placeholder="County" class="input" />
+            <input v-model="profileForm.physicalAddress" placeholder="Physical address" class="input" />
+            <input v-model="profileForm.contactPersonName" placeholder="Contact person" class="input" />
+            <input v-model="profileForm.email" placeholder="Email" class="input" />
+            <button type="submit" class="btn btn-primary col-span-2">Save profile</button>
           </form>
 
           <div class="mt-3 flex gap-2 border-t border-slate-100 pt-3">
             <button
               v-if="supplier.profile.status === 'ACTIVE'"
-              class="rounded-md border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-50"
+              class="btn btn-secondary btn-sm text-amber-800"
               @click="supplier.suspend(supplierId)"
             >
               Suspend
             </button>
             <button
               v-if="supplier.profile.status === 'SUSPENDED'"
-              class="rounded-md border border-emerald-300 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-50"
+              class="btn btn-secondary btn-sm text-emerald-800"
               @click="supplier.reactivate(supplierId)"
             >
               Reactivate
             </button>
             <button
               v-if="supplier.profile.status !== 'BLACKLISTED'"
-              class="rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-800 hover:bg-red-50"
+              class="btn btn-danger btn-sm"
               @click="supplier.blacklist(supplierId)"
             >
               Blacklist
@@ -240,8 +238,8 @@ async function handleRecordRisk() {
       </div>
 
       <!-- Beneficial owners -->
-      <div v-if="canReadSensitive" class="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 class="text-sm font-medium text-slate-900">Beneficial Owners</h2>
+      <div v-if="canReadSensitive" class="mt-6 card p-6">
+        <h2 class="section-title">Beneficial Owners</h2>
         <table class="mt-2 w-full text-xs">
           <thead>
             <tr class="text-left text-slate-500">
@@ -258,10 +256,10 @@ async function handleRecordRisk() {
               <td class="py-1 pr-2">{{ owner.nationalIdOrPassport }}</td>
               <td class="py-1 pr-2">{{ owner.ownershipPercentage }}%</td>
               <td class="py-1 pr-2">
-                <span v-if="owner.isPoliticallyExposedPerson" class="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">PEP</span>
+                <span v-if="owner.isPoliticallyExposedPerson" class="badge badge-warning">PEP</span>
               </td>
               <td class="py-1">
-                <button v-if="canManage" class="text-red-700 underline" @click="supplier.removeOwner(supplierId, owner.id)">
+                <button v-if="canManage" class="btn btn-ghost btn-sm text-red-700" @click="supplier.removeOwner(supplierId, owner.id)">
                   Remove
                 </button>
               </td>
@@ -269,23 +267,21 @@ async function handleRecordRisk() {
           </tbody>
         </table>
         <form v-if="canManage" class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleAddOwner">
-          <input v-model="ownerForm.fullName" required placeholder="Full name" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
-          <input v-model="ownerForm.nationalIdOrPassport" required placeholder="National ID / Passport" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
-          <input v-model.number="ownerForm.ownershipPercentage" type="number" min="0" max="100" required placeholder="% owned" class="w-24 rounded-md border border-slate-300 px-2 py-1 text-sm" />
-          <input v-model="ownerForm.position" placeholder="Position" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
+          <input v-model="ownerForm.fullName" required placeholder="Full name" class="input" />
+          <input v-model="ownerForm.nationalIdOrPassport" required placeholder="National ID / Passport" class="input" />
+          <input v-model.number="ownerForm.ownershipPercentage" type="number" min="0" max="100" required placeholder="% owned" class="input w-24" />
+          <input v-model="ownerForm.position" placeholder="Position" class="input" />
           <label class="flex items-center gap-1 text-xs text-slate-600">
-            <input v-model="ownerForm.isPoliticallyExposedPerson" type="checkbox" />
+            <input v-model="ownerForm.isPoliticallyExposedPerson" type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
             Politically exposed person
           </label>
-          <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
-            Add owner
-          </button>
+          <button type="submit" class="btn btn-primary btn-sm">Add owner</button>
         </form>
       </div>
 
       <!-- Compliance documents -->
-      <div v-if="canReadSensitive" class="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 class="text-sm font-medium text-slate-900">Compliance Documents</h2>
+      <div v-if="canReadSensitive" class="mt-6 card p-6">
+        <h2 class="section-title">Compliance Documents</h2>
         <table class="mt-2 w-full text-xs">
           <thead>
             <tr class="text-left text-slate-500">
@@ -301,23 +297,34 @@ async function handleRecordRisk() {
               <td class="py-1 pr-2">{{ doc.documentType }}</td>
               <td class="py-1 pr-2">{{ doc.fileName }}</td>
               <td class="py-1 pr-2 font-mono text-[10px]">{{ doc.fileHash.slice(0, 16) }}…</td>
-              <td class="py-1 pr-2">{{ doc.status }}</td>
+              <td class="py-1 pr-2">
+                <span
+                  class="badge"
+                  :class="{
+                    'badge-warning': doc.status === 'PENDING',
+                    'badge-success': doc.status === 'VERIFIED',
+                    'badge-danger': doc.status === 'REJECTED',
+                  }"
+                >
+                  {{ doc.status }}
+                </span>
+              </td>
               <td class="py-1">
                 <div v-if="doc.status === 'PENDING' && canVerify" class="flex items-center gap-1">
-                  <button class="text-emerald-700 underline" @click="supplier.verifyDocument(supplierId, doc.id)">Verify</button>
+                  <button class="btn btn-ghost btn-sm text-emerald-700" @click="supplier.verifyDocument(supplierId, doc.id)">Verify</button>
                   <input
                     v-model="rejectReasonByDoc[doc.id]"
                     placeholder="Rejection reason"
-                    class="w-28 rounded border border-slate-300 px-1 py-0.5"
+                    class="input w-28 px-1.5 py-1 text-xs"
                   />
-                  <button class="text-red-700 underline" @click="handleRejectDocument(doc.id)">Reject</button>
+                  <button class="btn btn-ghost btn-sm text-red-700" @click="handleRejectDocument(doc.id)">Reject</button>
                 </div>
               </td>
             </tr>
           </tbody>
         </table>
         <form v-if="canManage" class="mt-3 flex flex-wrap items-center gap-2" @submit.prevent="handleUploadDocument">
-          <select v-model="documentForm.documentType" class="rounded-md border border-slate-300 px-2 py-1 text-sm">
+          <select v-model="documentForm.documentType" class="select w-auto">
             <option value="REGISTRATION_CERTIFICATE">Registration certificate</option>
             <option value="TAX_COMPLIANCE_CERTIFICATE">Tax compliance certificate</option>
             <option value="CR12">CR12</option>
@@ -325,11 +332,7 @@ async function handleRecordRisk() {
             <option value="OTHER">Other</option>
           </select>
           <input type="file" required class="text-xs" @change="onFileChange" />
-          <button
-            type="submit"
-            :disabled="uploading || !documentForm.file"
-            class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-          >
+          <button type="submit" :disabled="uploading || !documentForm.file" class="btn btn-primary btn-sm">
             {{ uploading ? 'Uploading…' : 'Upload' }}
           </button>
         </form>
@@ -339,16 +342,15 @@ async function handleRecordRisk() {
       </div>
 
       <!-- Risk profile -->
-      <div v-if="canReadSensitive" class="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 class="text-sm font-medium text-slate-900">Risk Profile</h2>
+      <div v-if="canReadSensitive" class="mt-6 card p-6">
+        <h2 class="section-title">Risk Profile</h2>
         <div v-if="supplier.currentRisk" class="mt-2 flex items-center gap-3 text-xs">
           <span
-            class="rounded-full px-2 py-0.5 font-medium"
+            class="badge"
             :class="{
-              'bg-emerald-100 text-emerald-800': supplier.currentRisk.riskLevel === 'LOW',
-              'bg-amber-100 text-amber-800': supplier.currentRisk.riskLevel === 'MEDIUM',
-              'bg-orange-100 text-orange-800': supplier.currentRisk.riskLevel === 'HIGH',
-              'bg-red-100 text-red-800': supplier.currentRisk.riskLevel === 'CRITICAL',
+              'badge-success': supplier.currentRisk.riskLevel === 'LOW',
+              'badge-warning': supplier.currentRisk.riskLevel === 'MEDIUM',
+              'badge-danger': supplier.currentRisk.riskLevel === 'HIGH' || supplier.currentRisk.riskLevel === 'CRITICAL',
             }"
           >
             {{ supplier.currentRisk.riskLevel }}
@@ -372,18 +374,16 @@ async function handleRecordRisk() {
         </details>
 
         <form v-if="canVerify" class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleRecordRisk">
-          <select v-model="riskForm.riskLevel" class="rounded-md border border-slate-300 px-2 py-1 text-sm">
+          <select v-model="riskForm.riskLevel" class="select w-auto">
             <option value="LOW">Low</option>
             <option value="MEDIUM">Medium</option>
             <option value="HIGH">High</option>
             <option value="CRITICAL">Critical</option>
           </select>
-          <input v-model.number="riskForm.score" type="number" min="0" max="100" required placeholder="Score" class="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm" />
-          <input v-model="riskForm.factorsCsv" placeholder="Factors (comma-separated)" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
-          <input v-model="riskForm.notes" placeholder="Notes" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
-          <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
-            Record assessment
-          </button>
+          <input v-model.number="riskForm.score" type="number" min="0" max="100" required placeholder="Score" class="input w-20" />
+          <input v-model="riskForm.factorsCsv" placeholder="Factors (comma-separated)" class="input" />
+          <input v-model="riskForm.notes" placeholder="Notes" class="input" />
+          <button type="submit" class="btn btn-primary btn-sm">Record assessment</button>
         </form>
       </div>
     </div>

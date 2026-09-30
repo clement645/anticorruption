@@ -49,25 +49,23 @@ function nextStatuses(current: string): string[] {
 
 <template>
   <section class="mx-auto max-w-5xl px-4 py-10">
-    <h1 class="text-2xl font-semibold text-slate-900">Whistleblower Investigations</h1>
-    <p class="mt-1 text-sm text-slate-600">
-      Restricted to Auditor / Internal Auditor — the reporter's identity is never collected
-      unless they chose to leave contact information.
-    </p>
+    <div class="page-header">
+      <h1 class="page-title">Whistleblower Investigations</h1>
+      <p class="page-subtitle">
+        Restricted to Auditor / Internal Auditor — the reporter's identity is never collected
+        unless they chose to leave contact information.
+      </p>
+    </div>
 
-    <p v-if="store.error" class="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+    <p v-if="store.error" class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
       {{ store.error }}
     </p>
 
     <div class="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
-      <div class="rounded-lg border border-slate-200 bg-white p-4">
+      <div class="card p-4">
         <div class="flex items-center justify-between">
-          <h2 class="text-sm font-medium text-slate-900">Reports</h2>
-          <select
-            v-model="statusFilter"
-            class="rounded-md border border-slate-300 px-2 py-1 text-xs"
-            @change="applyFilter"
-          >
+          <h2 class="section-title">Reports</h2>
+          <select v-model="statusFilter" class="select w-auto px-2 py-1 text-xs" @change="applyFilter">
             <option value="">All statuses</option>
             <option value="SUBMITTED">Submitted</option>
             <option value="UNDER_REVIEW">Under review</option>
@@ -85,7 +83,17 @@ function nextStatuses(current: string): string[] {
             >
               <div class="flex items-center justify-between">
                 <span>{{ formatCategory(r.category) }}</span>
-                <span class="rounded-full bg-slate-100 px-2 py-0.5">{{ r.status }}</span>
+                <span
+                  class="badge"
+                  :class="{
+                    'badge-neutral': r.status === 'SUBMITTED',
+                    'badge-warning': r.status === 'UNDER_REVIEW',
+                    'badge-success': r.status === 'SUBSTANTIATED',
+                    'badge-danger': r.status === 'UNSUBSTANTIATED',
+                  }"
+                >
+                  {{ r.status }}
+                </span>
               </div>
               <p class="mt-1 line-clamp-2 text-slate-500">{{ r.description }}</p>
             </button>
@@ -96,10 +104,20 @@ function nextStatuses(current: string): string[] {
         </ul>
       </div>
 
-      <div v-if="store.reportDetail" class="rounded-lg border border-slate-200 bg-white p-4 text-sm">
+      <div v-if="store.reportDetail" class="card p-4 text-sm">
         <div class="flex items-center justify-between">
-          <h2 class="font-medium text-slate-900">{{ formatCategory(store.reportDetail.category) }}</h2>
-          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs">{{ store.reportDetail.status }}</span>
+          <h2 class="section-title">{{ formatCategory(store.reportDetail.category) }}</h2>
+          <span
+            class="badge"
+            :class="{
+              'badge-neutral': store.reportDetail.status === 'SUBMITTED',
+              'badge-warning': store.reportDetail.status === 'UNDER_REVIEW',
+              'badge-success': store.reportDetail.status === 'SUBSTANTIATED',
+              'badge-danger': store.reportDetail.status === 'UNSUBSTANTIATED',
+            }"
+          >
+            {{ store.reportDetail.status }}
+          </span>
         </div>
         <p class="mt-2 text-slate-600">{{ store.reportDetail.description }}</p>
         <p v-if="store.reportDetail.contact" class="mt-2 text-xs text-slate-500">
@@ -110,7 +128,7 @@ function nextStatuses(current: string): string[] {
           <button
             v-if="!store.reportDetail.assignedToId"
             type="button"
-            class="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
+            class="btn btn-secondary btn-sm"
             @click="handleAssign"
           >
             Assign to me
@@ -119,7 +137,7 @@ function nextStatuses(current: string): string[] {
             v-for="s in nextStatuses(store.reportDetail.status)"
             :key="s"
             type="button"
-            class="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
+            class="btn btn-secondary btn-sm"
             @click="handleChangeStatus(s)"
           >
             Mark {{ s.toLowerCase().replaceAll('_', ' ') }}
@@ -146,11 +164,11 @@ function nextStatuses(current: string): string[] {
           <li v-if="store.reportDetail.updates.length === 0" class="text-xs text-slate-400">No messages yet.</li>
         </ul>
         <form class="mt-3 flex gap-2" @submit.prevent="handlePostUpdate">
-          <input v-model="updateMessage" placeholder="Ask a follow-up question…" class="flex-1 rounded-md border border-slate-300 px-2 py-1 text-xs" />
-          <button type="submit" class="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">Send</button>
+          <input v-model="updateMessage" placeholder="Ask a follow-up question…" class="input flex-1 px-2 py-1 text-xs" />
+          <button type="submit" class="btn btn-secondary btn-sm">Send</button>
         </form>
       </div>
-      <div v-else class="rounded-lg border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+      <div v-else class="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
         Select a report to view details.
       </div>
     </div>

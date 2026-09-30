@@ -12,6 +12,9 @@
     "lint": "eslint . --fix"
   },
   "dependencies": {
+    "@lucide/vue": "^1.48.0",
+    "@noble/ed25519": "^3.2.0",
+    "@noble/hashes": "^1.8.0",
     "pinia": "^3.0.0",
     "vue": "^3.5.42",
     "vue-router": "^4.5.0"

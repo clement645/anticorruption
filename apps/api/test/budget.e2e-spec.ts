@@ -4,8 +4,10 @@ import cookieParser from 'cookie-parser';
 import * as argon2 from 'argon2';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { generateEd25519KeyPair } from '@bpfmps/crypto';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { signRequest } from './helpers/signing';
 
 interface LoginResponseBody {
   accessToken: string;
@@ -61,6 +63,7 @@ describe('Budget (e2e)', () => {
   let noPermToken: string;
   let orgId: string;
   let roleId: string;
+  let adminPrivateKeyPem: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -172,6 +175,16 @@ describe('Budget (e2e)', () => {
       .send({ email: noPermEmail, password })
       .expect(200);
     noPermToken = (noPermLogin.body as LoginResponseBody).accessToken;
+
+    // budget:approve is a @RequireSignature() route — the approving actor
+    // needs an enrolled Ed25519 key before any approve call below will work.
+    const keyPair = generateEd25519KeyPair();
+    adminPrivateKeyPem = keyPair.privateKeyPem;
+    await request(app.getHttpServer())
+      .post('/api/v1/users/me/signing-key')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ publicKeyPem: keyPair.publicKeyPem })
+      .expect(201);
   });
 
   afterAll(async () => {
@@ -241,9 +254,18 @@ describe('Budget (e2e)', () => {
     expect(budget.lines).toHaveLength(2);
 
     // Cannot approve a DRAFT budget directly — must go through PENDING_APPROVAL.
+    // (Carries a valid signature so this 400 genuinely re-tests the state
+    // machine, not just the @RequireSignature() precondition.)
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budget.id}/approve`)
       .set('Authorization', `Bearer ${adminToken}`)
+      .send(
+        signRequest(
+          'POST',
+          `/api/v1/budgets/${budget.id}/approve`,
+          adminPrivateKeyPem,
+        ),
+      )
       .expect(400);
 
     await request(app.getHttpServer())
@@ -260,6 +282,13 @@ describe('Budget (e2e)', () => {
     const approveResponse = await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budget.id}/approve`)
       .set('Authorization', `Bearer ${adminToken}`)
+      .send(
+        signRequest(
+          'POST',
+          `/api/v1/budgets/${budget.id}/approve`,
+          adminPrivateKeyPem,
+        ),
+      )
       .expect(200);
     expect((approveResponse.body as BudgetBody).status).toBe('APPROVED');
 
@@ -267,6 +296,13 @@ describe('Budget (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budget.id}/approve`)
       .set('Authorization', `Bearer ${adminToken}`)
+      .send(
+        signRequest(
+          'POST',
+          `/api/v1/budgets/${budget.id}/approve`,
+          adminPrivateKeyPem,
+        ),
+      )
       .expect(400);
 
     const allocations = await request(app.getHttpServer())
@@ -318,6 +354,13 @@ describe('Budget (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/approve`)
       .set('Authorization', `Bearer ${adminToken}`)
+      .send(
+        signRequest(
+          'POST',
+          `/api/v1/budgets/${budgetId}/approve`,
+          adminPrivateKeyPem,
+        ),
+      )
       .expect(200);
 
     const allocations = await request(app.getHttpServer())
@@ -419,6 +462,13 @@ describe('Budget (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/approve`)
       .set('Authorization', `Bearer ${adminToken}`)
+      .send(
+        signRequest(
+          'POST',
+          `/api/v1/budgets/${budgetId}/approve`,
+          adminPrivateKeyPem,
+        ),
+      )
       .expect(200);
 
     const allocations = await request(app.getHttpServer())

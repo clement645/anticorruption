@@ -4,8 +4,10 @@ import cookieParser from 'cookie-parser';
 import * as argon2 from 'argon2';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { generateEd25519KeyPair } from '@bpfmps/crypto';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { signRequest } from './helpers/signing';
 
 interface LoginResponseBody {
   accessToken: string;
@@ -55,6 +57,7 @@ describe('AI Risk Engine (e2e)', () => {
   let procOfficerUserId: string;
   let noPermUserId: string;
   let fullToken: string;
+  let fullPrivateKeyPem: string;
   let procOfficerToken: string;
   let noPermToken: string;
   let orgId: string;
@@ -239,6 +242,14 @@ describe('AI Risk Engine (e2e)', () => {
       .expect(200);
     fullToken = (fullLogin.body as LoginResponseBody).accessToken;
 
+    const fullKeyPair = generateEd25519KeyPair();
+    fullPrivateKeyPem = fullKeyPair.privateKeyPem;
+    await request(app.getHttpServer())
+      .post('/api/v1/users/me/signing-key')
+      .set('Authorization', `Bearer ${fullToken}`)
+      .send({ publicKeyPem: fullKeyPair.publicKeyPem })
+      .expect(201);
+
     const procOfficerLogin = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .send({ email: procOfficerEmail, password })
@@ -290,6 +301,13 @@ describe('AI Risk Engine (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/approve`)
       .set('Authorization', `Bearer ${fullToken}`)
+      .send(
+        signRequest(
+          'POST',
+          `/api/v1/budgets/${budgetId}/approve`,
+          fullPrivateKeyPem,
+        ),
+      )
       .expect(200);
     const allocations = await request(app.getHttpServer())
       .get('/api/v1/allocations')
@@ -565,6 +583,88 @@ describe('AI Risk Engine (e2e)', () => {
       .expect(200);
 
     expect((alerts.body as AlertBody[]).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('blocks approval of a request caught in an unresolved HIGH split-procurement alert, unblocks once an Auditor reviews it', async () => {
+    const highSplitOrg = await prisma.organization.create({
+      data: {
+        code: `E2E-HIGH-SPLIT-${Date.now()}`,
+        name: '[E2E] High Split Test Org',
+        type: 'MINISTRY',
+      },
+    });
+
+    async function createAndSubmit(amount: number): Promise<string> {
+      const req = await request(app.getHttpServer())
+        .post('/api/v1/procurement-requests')
+        .set('Authorization', `Bearer ${fullToken}`)
+        .send({
+          procurementPlanId: planId,
+          organizationId: highSplitOrg.id,
+          allocationId,
+          title: `E2E high split request ${Date.now()}-${Math.random()}`,
+          description: 'desc',
+          estimatedAmount: amount,
+        })
+        .expect(201);
+      const id = (req.body as IdBody).id;
+      await request(app.getHttpServer())
+        .post(`/api/v1/procurement-requests/${id}/submit`)
+        .set('Authorization', `Bearer ${fullToken}`)
+        .expect(200);
+      return id;
+    }
+
+    const firstId = await createAndSubmit(900_000);
+    await request(app.getHttpServer())
+      .post(`/api/v1/procurement-requests/${firstId}/approve`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
+
+    // Left SUBMITTED, not approved — this is the request the preventive gate
+    // must block once the pattern below is detected, since it will be named
+    // in the alert's evidence.requestIds despite never having been approved.
+    const pendingId = await createAndSubmit(900_000);
+
+    const thirdId = await createAndSubmit(900_000);
+    // Combined total (2.7M) now exceeds double the 1M threshold — HIGH
+    // severity — with every individual request still under the threshold.
+    await request(app.getHttpServer())
+      .post(`/api/v1/procurement-requests/${thirdId}/approve`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
+
+    const alerts = await request(app.getHttpServer())
+      .get('/api/v1/risk-alerts')
+      .query({ detectorType: 'SPLIT_PROCUREMENT', resourceId: thirdId })
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
+    const alertList = alerts.body as Array<{ id: string; severity: string }>;
+    const highAlert = alertList.find((a) => a.severity === 'HIGH');
+    expect(highAlert).toBeDefined();
+
+    // The still-pending request from the SAME flagged batch cannot be
+    // approved while this HIGH alert is unresolved — budget must not be
+    // committed to it until an independent Auditor looks at it.
+    await request(app.getHttpServer())
+      .post(`/api/v1/procurement-requests/${pendingId}/approve`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/risk-alerts/${highAlert!.id}/review`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .send({
+        status: 'DISMISSED',
+        notes: 'E2E: reviewed, legitimate purchases',
+      })
+      .expect(200);
+
+    // Unblocked now that an Auditor has resolved the flag.
+    await request(app.getHttpServer())
+      .post(`/api/v1/procurement-requests/${pendingId}/approve`)
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
   });
 
   it('a single request already at/above the threshold is not "split procurement"', async () => {

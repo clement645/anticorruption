@@ -167,6 +167,7 @@ model User {
   mfaMethods        MfaMethod[]
   apiKeys           ApiKey[]
   digitalIdentities DigitalIdentity[]
+  signatureNonces   SignatureNonce[]
   securityEvents    SecurityEvent[]
   auditEvents       AuditEvent[]
 
@@ -298,9 +299,16 @@ model ApiKey {
   @@map("api_keys")
 }
 
-// Placeholder for the digital-signature abstraction (section 6). Populated once
-// application-level signing keys (and later government PKI/HSM key references)
-// are issued in Phase 3.
+// Per-official digital-signature abstraction (section 6). A user generates
+// their own Ed25519 keypair CLIENT-SIDE and uploads only the public key here
+// (`POST /users/me/signing-key`) — the private key never reaches this server,
+// which is what makes a resulting signature genuine non-repudiation rather
+// than something an admin (who could otherwise hold the key) could forge.
+// `revokedAt` marks a key as no longer usable for NEW signatures, but a row
+// is never deleted: a historical signature is always re-verified against the
+// exact key (`keyId`) that produced it, regardless of later revocation —
+// this mirrors real PKI semantics (revocation prevents future use, it does
+// not retroactively invalidate what was validly signed before revocation).
 model DigitalIdentity {
   id        String    @id @default(uuid())
   userId    String
@@ -314,6 +322,25 @@ model DigitalIdentity {
 
   @@index([userId])
   @@map("digital_identities")
+}
+
+// Prevents a captured/observed signature from being replayed against the
+// same endpoint again (see SignatureGuard). A nonce is inserted exactly once
+// — the unique constraint is the actual enforcement mechanism, not just an
+// index. Rows older than the signature timestamp window (5 minutes, see
+// SignatureGuard) are safe to purge periodically; nothing reads them after
+// that window closes, so no cleanup job is required for correctness, only
+// for table size (see DEPLOYMENT.md residual-risk notes).
+model SignatureNonce {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nonce     String   @unique
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("signature_nonces")
 }
 
 // ---------------------------------------------------------------------------
@@ -376,6 +403,23 @@ model AuditEvent {
 
   signature      String
   signatureKeyId String
+
+  // Distinct from `signature`/`signatureKeyId` above, which prove the AUDIT
+  // LOG ITSELF wasn't tampered with (signed by the one system-wide audit
+  // key). These two prove the ACTOR themselves personally authorized this
+  // specific action, signed with their own individually-held key (see
+  // DigitalIdentity) — only populated for routes decorated with
+  // @RequireSignature(). Loose reference to DigitalIdentity.keyId (not a
+  // foreign key), same pattern as blockchainTxRef below: verification looks
+  // up that exact historical key, never "the user's current key".
+  actorSignature       String?
+  actorKeyId           String?
+  // The exact canonical string the actor signed (`${METHOD} ${path}
+  // ${timestamp} ${nonce}` — see SignatureGuard). Stored verbatim, not
+  // reconstructed, because AuditService.verifyEvent() must be able to
+  // re-run verifyEd25519() against the precise bytes that were originally
+  // signed; nothing else on this row reliably reproduces it later.
+  actorSignedPayload String?
 
   ipAddress     String?
   userAgent     String?
@@ -1075,6 +1119,7 @@ enum RiskDetectorType {
   BID_COLLUSION
   SPLIT_PROCUREMENT
   SUPPLIER_RISK
+  DUPLICATE_PAYMENT
 }
 
 enum RiskAlertSeverity {

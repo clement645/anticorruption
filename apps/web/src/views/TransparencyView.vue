@@ -45,38 +45,40 @@ function statusColor(status: string): string {
 
 <template>
   <section class="mx-auto max-w-5xl px-4 py-10">
-    <h1 class="text-2xl font-semibold text-slate-900">Citizen Transparency Portal</h1>
-    <p class="mt-1 text-sm text-slate-600">
-      Public, no sign-in required. Search public projects, tenders, and suppliers, view where
-      public budgets are allocated, and independently verify the hash of any piece of published
-      evidence.
-    </p>
+    <div class="page-header">
+      <h1 class="page-title">Citizen Transparency Portal</h1>
+      <p class="page-subtitle">
+        Public, no sign-in required. Search public projects, tenders, and suppliers, view where
+        public budgets are allocated, and independently verify the hash of any piece of published
+        evidence.
+      </p>
+    </div>
 
     <nav class="mt-6 flex flex-wrap gap-1 border-b border-slate-200 text-sm">
       <button
         v-for="tab in (['projects', 'tenders', 'suppliers', 'budgets', 'verify'] as Tab[])"
         :key="tab"
         type="button"
-        class="rounded-t-md px-3 py-2 capitalize"
-        :class="activeTab === tab ? 'border-b-2 border-slate-900 font-medium text-slate-900' : 'text-slate-500 hover:text-slate-800'"
+        class="rounded-t-lg px-3 py-2 capitalize"
+        :class="activeTab === tab ? 'border-b-2 border-brand-600 font-medium text-brand-700' : 'text-slate-500 hover:text-slate-800'"
         @click="setTab(tab)"
       >
         {{ tab === 'verify' ? 'Verify a hash' : tab }}
       </button>
     </nav>
 
-    <p v-if="store.error" class="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+    <p v-if="store.error" class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
       {{ store.error }}
     </p>
 
     <!-- Projects -->
     <div v-if="activeTab === 'projects'" class="mt-6">
       <form class="flex gap-2" @submit.prevent="store.searchProjects(projectSearch)">
-        <input v-model="projectSearch" placeholder="Search projects by name" class="w-72 rounded-md border border-slate-300 px-2 py-1 text-sm" />
-        <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">Search</button>
+        <input v-model="projectSearch" placeholder="Search projects by name" class="input w-72" />
+        <button type="submit" class="btn btn-primary btn-sm">Search</button>
       </form>
 
-      <ul class="mt-4 divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+      <ul class="mt-4 divide-y divide-slate-100 card">
         <li v-for="p in store.projects" :key="p.id" class="p-3 text-sm">
           <button type="button" class="text-left font-medium text-slate-900 hover:underline" @click="openProject(p.id)">
             {{ p.name }}
@@ -87,7 +89,7 @@ function statusColor(status: string): string {
         <li v-if="store.projects.length === 0" class="p-3 text-sm text-slate-500">No projects found.</li>
       </ul>
 
-      <div v-if="store.projectDetail && selectedProjectId" class="mt-4 rounded-lg border border-slate-200 bg-white p-4 text-sm">
+      <div v-if="store.projectDetail && selectedProjectId" class="mt-4 card p-4 text-sm">
         <h2 class="font-medium text-slate-900">{{ store.projectDetail.name }}</h2>
         <p class="mt-1 text-slate-600">{{ store.projectDetail.description }}</p>
         <p class="mt-2 text-xs text-slate-500">
@@ -117,12 +119,12 @@ function statusColor(status: string): string {
     <!-- Tenders -->
     <div v-if="activeTab === 'tenders'" class="mt-6">
       <form class="flex gap-2" @submit.prevent="store.searchTenders(tenderSearch)">
-        <input v-model="tenderSearch" placeholder="Search tenders by title" class="w-72 rounded-md border border-slate-300 px-2 py-1 text-sm" />
-        <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">Search</button>
+        <input v-model="tenderSearch" placeholder="Search tenders by title" class="input w-72" />
+        <button type="submit" class="btn btn-primary btn-sm">Search</button>
       </form>
       <p class="mt-1 text-[11px] text-slate-400">Only published tenders appear here — drafts are internal.</p>
 
-      <ul class="mt-4 divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+      <ul class="mt-4 divide-y divide-slate-100 card">
         <li v-for="t in store.tenders" :key="t.id" class="p-3 text-sm">
           <button type="button" class="text-left font-medium text-slate-900 hover:underline" @click="openTender(t.id)">
             {{ t.title }}
@@ -133,7 +135,7 @@ function statusColor(status: string): string {
         <li v-if="store.tenders.length === 0" class="p-3 text-sm text-slate-500">No tenders found.</li>
       </ul>
 
-      <div v-if="store.tenderDetail && selectedTenderId" class="mt-4 rounded-lg border border-slate-200 bg-white p-4 text-sm">
+      <div v-if="store.tenderDetail && selectedTenderId" class="mt-4 card p-4 text-sm">
         <h2 class="font-medium text-slate-900">{{ store.tenderDetail.title }}</h2>
         <p class="mt-1 text-slate-600">{{ store.tenderDetail.description }}</p>
         <h3 class="mt-3 text-xs font-medium uppercase text-slate-500">Lots</h3>
@@ -152,65 +154,69 @@ function statusColor(status: string): string {
     <!-- Suppliers -->
     <div v-if="activeTab === 'suppliers'" class="mt-6">
       <form class="flex gap-2" @submit.prevent="store.searchSuppliers(supplierSearch)">
-        <input v-model="supplierSearch" placeholder="Search suppliers by name" class="w-72 rounded-md border border-slate-300 px-2 py-1 text-sm" />
-        <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">Search</button>
+        <input v-model="supplierSearch" placeholder="Search suppliers by name" class="input w-72" />
+        <button type="submit" class="btn btn-primary btn-sm">Search</button>
       </form>
 
-      <table class="mt-4 w-full rounded-lg border border-slate-200 bg-white text-xs">
-        <thead>
-          <tr class="border-b border-slate-100 text-left text-slate-500">
-            <th class="px-3 py-2">Name</th>
-            <th class="px-3 py-2">Registration #</th>
-            <th class="px-3 py-2">County</th>
-            <th class="px-3 py-2">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="s in store.suppliers" :key="s.id" class="border-b border-slate-50">
-            <td class="px-3 py-2">{{ s.name }}</td>
-            <td class="px-3 py-2 font-mono">{{ s.registrationNumber }}</td>
-            <td class="px-3 py-2">{{ s.county ?? '—' }}</td>
-            <td class="px-3 py-2" :class="statusColor(s.status)">{{ s.status }}</td>
-          </tr>
-          <tr v-if="store.suppliers.length === 0">
-            <td colspan="4" class="px-3 py-6 text-center text-slate-500">No suppliers found.</td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="mt-4 table-shell">
+        <table class="table-base text-xs">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Registration #</th>
+              <th>County</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="s in store.suppliers" :key="s.id">
+              <td>{{ s.name }}</td>
+              <td class="font-mono">{{ s.registrationNumber }}</td>
+              <td>{{ s.county ?? '—' }}</td>
+              <td :class="statusColor(s.status)">{{ s.status }}</td>
+            </tr>
+            <tr v-if="store.suppliers.length === 0">
+              <td colspan="4" class="text-center text-slate-500">No suppliers found.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Budgets -->
     <div v-if="activeTab === 'budgets'" class="mt-6">
-      <table class="w-full rounded-lg border border-slate-200 bg-white text-xs">
-        <thead>
-          <tr class="border-b border-slate-100 text-left text-slate-500">
-            <th class="px-3 py-2">Organization</th>
-            <th class="px-3 py-2">Fiscal year</th>
-            <th class="px-3 py-2">Vote</th>
-            <th class="px-3 py-2">Authorized</th>
-            <th class="px-3 py-2">Committed</th>
-            <th class="px-3 py-2">Spent</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(b, i) in store.budgetLines" :key="i" class="border-b border-slate-50">
-            <td class="px-3 py-2">{{ b.organizationName }}</td>
-            <td class="px-3 py-2">{{ b.fiscalYearName }}</td>
-            <td class="px-3 py-2">{{ b.voteCode }} — {{ b.voteName }}</td>
-            <td class="px-3 py-2">{{ b.authorizedAmount }}</td>
-            <td class="px-3 py-2">{{ b.committedAmount }}</td>
-            <td class="px-3 py-2">{{ b.spentAmount }}</td>
-          </tr>
-          <tr v-if="store.budgetLines.length === 0">
-            <td colspan="6" class="px-3 py-6 text-center text-slate-500">No public budget data yet.</td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="table-shell">
+        <table class="table-base text-xs">
+          <thead>
+            <tr>
+              <th>Organization</th>
+              <th>Fiscal year</th>
+              <th>Vote</th>
+              <th>Authorized</th>
+              <th>Committed</th>
+              <th>Spent</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(b, i) in store.budgetLines" :key="i">
+              <td>{{ b.organizationName }}</td>
+              <td>{{ b.fiscalYearName }}</td>
+              <td>{{ b.voteCode }} — {{ b.voteName }}</td>
+              <td>{{ b.authorizedAmount }}</td>
+              <td>{{ b.committedAmount }}</td>
+              <td>{{ b.spentAmount }}</td>
+            </tr>
+            <tr v-if="store.budgetLines.length === 0">
+              <td colspan="6" class="text-center text-slate-500">No public budget data yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Verify a hash -->
-    <div v-if="activeTab === 'verify'" class="mt-6 rounded-lg border border-slate-200 bg-white p-6">
-      <h2 class="text-sm font-medium text-slate-900">Verify a piece of published evidence</h2>
+    <div v-if="activeTab === 'verify'" class="mt-6 card p-6">
+      <h2 class="section-title">Verify a piece of published evidence</h2>
       <p class="mt-1 text-xs text-slate-500">
         Paste the SHA-256 hash of a file (a project photo, report, etc.) to check whether it
         matches an officially recorded piece of evidence, whether it's anchored on the blockchain
@@ -220,14 +226,14 @@ function statusColor(status: string): string {
         <input
           v-model="hashInput"
           placeholder="64-character SHA-256 hex digest"
-          class="flex-1 rounded-md border border-slate-300 px-2 py-1 font-mono text-sm"
+          class="input flex-1 font-mono"
         />
-        <button type="submit" :disabled="store.loading" class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+        <button type="submit" :disabled="store.loading" class="btn btn-primary btn-sm">
           {{ store.loading ? 'Checking…' : 'Verify' }}
         </button>
       </form>
 
-      <div v-if="store.verification" class="mt-4 rounded-md border p-3 text-sm" :class="store.verification.found ? 'border-slate-200' : 'border-amber-200 bg-amber-50'">
+      <div v-if="store.verification" class="mt-4 rounded-lg border p-3 text-sm" :class="store.verification.found ? 'border-slate-200' : 'border-amber-200 bg-amber-50'">
         <template v-if="!store.verification.found">
           <p class="text-amber-800">No matching evidence found for this hash.</p>
         </template>

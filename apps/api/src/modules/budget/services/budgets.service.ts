@@ -231,6 +231,11 @@ export class BudgetsService {
     id: string,
     actor: { sub: string; email: string; organizationId: string | null },
     requestMeta: { ipAddress?: string; userAgent?: string },
+    verifiedSignature?: {
+      signature: string;
+      keyId: string;
+      signedPayload: string;
+    },
   ): Promise<BudgetView> {
     const budget = await this.getByIdOrThrow(id);
     if (budget.status !== 'PENDING_APPROVAL') {
@@ -296,6 +301,9 @@ export class BudgetsService {
       payload: { budgetId: id, allocationsCreated: allocations.created.length },
       ipAddress: requestMeta.ipAddress,
       userAgent: requestMeta.userAgent,
+      actorSignature: verifiedSignature?.signature,
+      actorKeyId: verifiedSignature?.keyId,
+      actorSignedPayload: verifiedSignature?.signedPayload,
     });
 
     return this.getView(id);

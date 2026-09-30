@@ -70,6 +70,9 @@ function toView(event: AuditEvent): AuditEventView {
     currentHash: event.currentHash,
     signature: event.signature,
     signatureKeyId: event.signatureKeyId,
+    actorSignature: event.actorSignature,
+    actorKeyId: event.actorKeyId,
+    actorSignedPayload: event.actorSignedPayload,
     ipAddress: event.ipAddress,
     userAgent: event.userAgent,
     requestId: event.requestId,
@@ -143,6 +146,9 @@ export class AuditService {
           currentHash,
           signature,
           signatureKeyId: keyId,
+          actorSignature: input.actorSignature,
+          actorKeyId: input.actorKeyId,
+          actorSignedPayload: input.actorSignedPayload,
           ipAddress: input.ipAddress,
           userAgent: input.userAgent,
           requestId: input.requestId,
@@ -301,6 +307,7 @@ export class AuditService {
       event.signature,
       publicKeyPem,
     );
+    const actorSignatureValid = await this.verifyActorSignature(event);
 
     return {
       event: toView(event),
@@ -309,13 +316,49 @@ export class AuditService {
         chainLinkValid,
         currentHashValid,
         signatureValid,
+        actorSignatureValid,
       },
       verified:
         payloadHashValid &&
         chainLinkValid &&
         currentHashValid &&
-        signatureValid,
+        signatureValid &&
+        actorSignatureValid !== false,
     };
+  }
+
+  /**
+   * Re-verifies an event's per-actor signature (distinct from the system
+   * chain signature above) against the EXACT historical key it was made
+   * with — never "the actor's current key", since a key rotation/revocation
+   * must not retroactively break a signature that was valid at the time —
+   * and against the exact canonical string that was signed (stored verbatim
+   * in actorSignedPayload precisely so this re-check is a real
+   * cryptographic verification, not a "well-formed signature over
+   * something" shrug). Returns null (not applicable) when the event never
+   * carried one.
+   */
+  private async verifyActorSignature(
+    event: AuditEvent,
+  ): Promise<boolean | null> {
+    if (
+      !event.actorSignature ||
+      !event.actorKeyId ||
+      !event.actorSignedPayload
+    ) {
+      return null;
+    }
+    const key = await this.prisma.digitalIdentity.findUnique({
+      where: { keyId: event.actorKeyId },
+    });
+    if (!key) {
+      return false;
+    }
+    return verifyEd25519(
+      event.actorSignedPayload,
+      event.actorSignature,
+      key.publicKey,
+    );
   }
 
   /**

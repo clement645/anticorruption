@@ -14,6 +14,8 @@ export type SecurityEventType =
   | 'TOKEN_REUSE_DETECTED'
   | 'LOGOUT'
   | 'USER_CREATED'
+  | 'USER_UPDATED'
+  | 'SIGNING_KEY_ENROLLED'
   | 'AUTHORIZATION_DENIED';
 
 interface RecordEventInput {

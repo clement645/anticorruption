@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { BudgetModule } from '../budget/budget.module';
+import { RiskModule } from '../risk/risk.module';
 import { ContractsService } from './services/contracts.service';
 import { PurchaseOrdersService } from './services/purchase-orders.service';
 import { InvoicesService } from './services/invoices.service';
@@ -23,7 +24,7 @@ import {
  * trivial read.
  */
 @Module({
-  imports: [AuditModule, BudgetModule],
+  imports: [AuditModule, BudgetModule, RiskModule],
   controllers: [
     ContractsController,
     PurchaseOrdersController,

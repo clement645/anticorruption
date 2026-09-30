@@ -81,6 +81,17 @@ const router = createRouter({
       component: () => import('../views/WhistleblowerInvestigationView.vue'),
       meta: { requiresPermission: 'whistleblower:read' },
     },
+    {
+      path: '/admin/users',
+      name: 'admin-users',
+      component: () => import('../views/AdminUsersView.vue'),
+      meta: { requiresPermission: 'users:read' },
+    },
+    {
+      path: '/settings/signing-key',
+      name: 'signing-key',
+      component: () => import('../views/SigningKeyView.vue'),
+    },
   ],
 })
 

@@ -50,46 +50,42 @@ onMounted(() => {
 
 <template>
   <section class="mx-auto max-w-5xl px-4 py-10">
-    <h1 class="text-2xl font-semibold text-slate-900">AI Risk Engine</h1>
-    <p class="mt-1 text-sm text-slate-600">
-      Deterministic/statistical detector findings — advisory only. Nothing here blocks a transaction; a human
-      always reviews before any action follows.
-    </p>
+    <div class="page-header">
+      <h1 class="page-title">AI Risk Engine</h1>
+      <p class="page-subtitle">
+        Deterministic/statistical detector findings — advisory only. Nothing here blocks a transaction; a human
+        always reviews before any action follows.
+      </p>
+    </div>
 
-    <p v-if="risk.error" class="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+    <p v-if="risk.error" class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
       {{ risk.error }}
     </p>
 
-    <div class="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+    <div class="mt-6 card p-6">
       <div class="flex flex-wrap items-end gap-2">
-        <select v-model="filters.status" class="rounded-md border border-slate-300 px-2 py-1 text-sm">
+        <select v-model="filters.status" class="select w-auto">
           <option value="">All statuses</option>
           <option value="OPEN">Open</option>
           <option value="UNDER_REVIEW">Under review</option>
           <option value="CONFIRMED">Confirmed</option>
           <option value="DISMISSED">Dismissed</option>
         </select>
-        <select v-model="filters.severity" class="rounded-md border border-slate-300 px-2 py-1 text-sm">
+        <select v-model="filters.severity" class="select w-auto">
           <option value="">All severities</option>
           <option value="LOW">Low</option>
           <option value="MEDIUM">Medium</option>
           <option value="HIGH">High</option>
           <option value="CRITICAL">Critical</option>
         </select>
-        <select v-model="filters.detectorType" class="rounded-md border border-slate-300 px-2 py-1 text-sm">
+        <select v-model="filters.detectorType" class="select w-auto">
           <option value="">All detectors</option>
           <option value="PRICE_ANOMALY">Price anomaly</option>
           <option value="BID_COLLUSION">Bid collusion</option>
           <option value="SPLIT_PROCUREMENT">Split procurement</option>
           <option value="SUPPLIER_RISK">Supplier risk</option>
         </select>
-        <button
-          type="button"
-          class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
-          @click="applyFilters"
-        >
-          Apply filters
-        </button>
+        <button type="button" class="btn btn-primary btn-sm" @click="applyFilters">Apply filters</button>
       </div>
 
       <table class="mt-4 w-full text-xs">
@@ -108,12 +104,11 @@ onMounted(() => {
             <tr class="border-t border-slate-100">
               <td class="py-1 pr-2">
                 <span
-                  class="rounded-full px-2 py-0.5 font-medium"
+                  class="badge"
                   :class="{
-                    'bg-emerald-100 text-emerald-800': alert.severity === 'LOW',
-                    'bg-amber-100 text-amber-800': alert.severity === 'MEDIUM',
-                    'bg-orange-100 text-orange-800': alert.severity === 'HIGH',
-                    'bg-red-100 text-red-800': alert.severity === 'CRITICAL',
+                    'badge-success': alert.severity === 'LOW',
+                    'badge-warning': alert.severity === 'MEDIUM',
+                    'badge-danger': alert.severity === 'HIGH' || alert.severity === 'CRITICAL',
                   }"
                 >
                   {{ alert.severity }}
@@ -122,9 +117,21 @@ onMounted(() => {
               <td class="py-1 pr-2">{{ alert.detectorType }}</td>
               <td class="py-1 pr-2">{{ alert.title }}</td>
               <td class="py-1 pr-2 text-slate-500">{{ alert.resourceType }} {{ alert.resourceId.slice(0, 8) }}…</td>
-              <td class="py-1 pr-2">{{ alert.status }}</td>
+              <td class="py-1 pr-2">
+                <span
+                  class="badge"
+                  :class="{
+                    'badge-neutral': alert.status === 'OPEN',
+                    'badge-warning': alert.status === 'UNDER_REVIEW',
+                    'badge-danger': alert.status === 'CONFIRMED',
+                    'badge-info': alert.status === 'DISMISSED',
+                  }"
+                >
+                  {{ alert.status }}
+                </span>
+              </td>
               <td class="py-1">
-                <button class="underline" @click="toggleEvidence(alert.id)">
+                <button class="btn btn-ghost btn-sm" @click="toggleEvidence(alert.id)">
                   {{ expandedId === alert.id ? 'Hide' : 'Details' }}
                 </button>
               </td>
@@ -132,7 +139,7 @@ onMounted(() => {
             <tr v-if="expandedId === alert.id" class="border-t border-slate-100 bg-slate-50">
               <td colspan="6" class="p-3">
                 <p class="text-slate-600">{{ alert.description }}</p>
-                <pre class="mt-2 overflow-x-auto rounded bg-white p-2 text-[11px] text-slate-600">{{
+                <pre class="mt-2 overflow-x-auto rounded-lg bg-white p-2 text-[11px] text-slate-600">{{
                   JSON.stringify(alert.evidence, null, 2)
                 }}</pre>
                 <div v-if="alert.reviewedById" class="mt-2 text-slate-500">
@@ -143,23 +150,23 @@ onMounted(() => {
                   <input
                     v-model="notesByAlert[alert.id]"
                     placeholder="Review notes"
-                    class="w-56 rounded border border-slate-300 px-2 py-1"
+                    class="input w-56 px-2 py-1 text-xs"
                   />
                   <button
                     v-if="alert.status === 'OPEN'"
-                    class="rounded border border-slate-300 px-2 py-1 hover:bg-white"
+                    class="btn btn-secondary btn-sm"
                     @click="handleReview(alert.id, 'UNDER_REVIEW')"
                   >
                     Mark under review
                   </button>
                   <button
-                    class="rounded border border-red-300 px-2 py-1 text-red-700 hover:bg-red-50"
+                    class="btn btn-secondary btn-sm text-red-700"
                     @click="handleReview(alert.id, 'CONFIRMED')"
                   >
                     Confirm
                   </button>
                   <button
-                    class="rounded border border-slate-300 px-2 py-1 hover:bg-white"
+                    class="btn btn-secondary btn-sm"
                     @click="handleReview(alert.id, 'DISMISSED')"
                   >
                     Dismiss
@@ -173,13 +180,13 @@ onMounted(() => {
       <p v-if="risk.alerts.length === 0" class="mt-3 text-xs text-slate-400">No alerts match these filters.</p>
     </div>
 
-    <div v-if="canManage" class="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 class="text-sm font-medium text-slate-900">Manual re-scan</h2>
+    <div v-if="canManage" class="mt-6 card p-6">
+      <h2 class="section-title">Manual re-scan</h2>
       <p class="mt-1 text-xs text-slate-500">
         Re-run a detector on demand against a specific tender, organization, or supplier by ID.
       </p>
       <form class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleScan">
-        <select v-model="scanForm.kind" class="rounded-md border border-slate-300 px-2 py-1 text-sm">
+        <select v-model="scanForm.kind" class="select w-auto">
           <option value="suppliers">Supplier risk</option>
           <option value="tenders">Tender (price anomaly + collusion)</option>
           <option value="organizations">Organization (split procurement)</option>
@@ -188,11 +195,9 @@ onMounted(() => {
           v-model="scanForm.resourceId"
           required
           placeholder="Resource ID"
-          class="w-72 rounded-md border border-slate-300 px-2 py-1 text-sm"
+          class="input w-72"
         />
-        <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
-          Run scan
-        </button>
+        <button type="submit" class="btn btn-primary btn-sm">Run scan</button>
       </form>
     </div>
   </section>

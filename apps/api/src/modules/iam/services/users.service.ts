@@ -1,11 +1,13 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../../../prisma/prisma.service';
 import type { CreateUserDto } from '../dto/create-user.dto';
+import { UserStatusDto, type UpdateUserDto } from '../dto/update-user.dto';
 import type { JwtPayload } from '../types/jwt-payload.type';
 
 const userWithRolesInclude = {
@@ -73,13 +75,70 @@ export class UsersService {
           status: true,
           organizationId: true,
           departmentId: true,
+          organization: { select: { id: true, name: true } },
+          department: { select: { id: true, name: true } },
           lastLoginAt: true,
           createdAt: true,
+          roles: { select: { role: { select: { id: true, name: true } } } },
         },
       }),
       this.prisma.user.count(),
     ]);
-    return { items, total };
+    return {
+      items: items.map((item) => ({
+        ...item,
+        roles: item.roles.map((ur) => ur.role),
+      })),
+      total,
+    };
+  }
+
+  /**
+   * Roles are always fully replaced, not diffed — the admin UI always
+   * submits the complete intended set, so partial add/remove semantics
+   * would be surprising and this stays a single source of truth for what
+   * "this user's roles" means after the call.
+   */
+  async update(id: string, dto: UpdateUserDto, actorId: string) {
+    await this.findByIdOrThrow(id);
+
+    if (
+      id === actorId &&
+      dto.status !== undefined &&
+      dto.status !== UserStatusDto.ACTIVE
+    ) {
+      throw new ForbiddenException('You cannot change your own account status');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.roleIds) {
+        await tx.userRole.deleteMany({ where: { userId: id } });
+        await tx.userRole.createMany({
+          data: dto.roleIds.map((roleId) => ({ userId: id, roleId })),
+        });
+      }
+
+      const updated = await tx.user.update({
+        where: { id },
+        data: {
+          status: dto.status,
+          organizationId: dto.organizationId,
+          departmentId: dto.departmentId,
+        },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          status: true,
+          organizationId: true,
+          departmentId: true,
+          roles: { select: { role: { select: { id: true, name: true } } } },
+        },
+      });
+
+      return { ...updated, roles: updated.roles.map((ur) => ur.role) };
+    });
   }
 
   async create(dto: CreateUserDto) {

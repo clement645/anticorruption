@@ -84,6 +84,17 @@ export const envSchema = z.object({
     .positive()
     .default(3),
 
+  // Duplicate-payment detector (post-launch — deferred from Phase 8, no
+  // Invoice entity existed yet). Window to look back for another invoice
+  // from the same supplier at the same amount — a policy decision (how long
+  // is "suspicious" for a resubmitted invoice) rather than a statistical
+  // parameter, same reasoning as the split-procurement config above.
+  RISK_DUPLICATE_PAYMENT_WINDOW_DAYS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(90),
+
   // Evidence vault / object storage (Phase 10). ARCHITECTURE.md § 7 always
   // described "large documents live in encrypted object storage, only their
   // hash is anchored on-chain" — this is the first phase that actually

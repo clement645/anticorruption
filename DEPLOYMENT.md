@@ -76,19 +76,30 @@ docker run --name bpfmps-postgres -e POSTGRES_PASSWORD=postgres \
 with `DATABASE_URL=postgresql://postgres:postgres@localhost:55432/bpfmps` in
 `apps/api/.env`. Because Neon is standard PostgreSQL, switching to a real Neon project
 for any real environment is purely a connection-string change — no schema or code
-changes are required, and Phase 14 confirmed this directly: real Neon pooled/direct
-connection strings were supplied and dropped into `apps/api/.env` with zero code
-changes needed. **Schema deployment against that real Neon project was attempted
-(`prisma migrate deploy`) and blocked by this environment's own safety tooling as a
-"production deploy" action** — a reasonable guardrail for a real, credentialed cloud
-database that this agent should not unilaterally alter. This is deliberately left as
-a pending, explicit human action rather than worked around: the person running this
-should execute `npm run prisma:migrate:deploy` (from `packages/database`, with
-`DATABASE_URL`/`DIRECT_DATABASE_URL` in `apps/api/.env` pointed at the real Neon
-project) themselves, then `npm run prisma:seed`, to actually stand up the schema on
-Neon. Everything else in this document describing Neon is accurate and current
-(connection string format, pooled-vs-direct usage, `connection_limit` tuning below);
-only the one-time schema deployment itself remains undone by design.
+changes are required. **The schema is now deployed on the real Neon project and the
+system is live** (backend on Render, frontend on Netlify, both connected to the real
+GitHub repository) — the earlier pending step (`prisma migrate deploy` against Neon,
+originally blocked by this environment's own safety tooling as a "production deploy"
+action, and deliberately left to the person running this rather than worked around)
+has since been completed outside this agent.
+
+**Gotcha discovered and fixed post-launch:** Prisma's generated client (custom
+`output` in `packages/database/prisma/schema.prisma`) loads its own `.env` file from
+`packages/database/`, independently of whatever `apps/api/.env` says. During Phase 14's
+Neon connectivity check, `packages/database/.env` was left holding the real Neon
+connection string. Later, `apps/api/.env` was correctly restored to local Postgres for
+testing, but `packages/database/.env` was not — so NestJS's own config validation
+(reading `apps/api/.env`) looked correct while the actual Prisma database driver
+(reading `packages/database/.env`) silently connected to the real Neon database for
+any command run from this environment (`prisma generate`, `prisma db seed`, and one
+e2e test run). All affected writes were idempotent, clearly-marked demo/test data
+(`[DEMO]`/`[E2E]`-prefixed roles and `*@test.bpfmps.local` users) — nothing destructive
+— but this is exactly the kind of accidental production write the "ask before running
+migrate deploy" caution in this document exists to prevent, so it's recorded here
+rather than quietly fixed. **Lesson for future local development**: both
+`apps/api/.env` AND `packages/database/.env` must point at the same target — check
+both, not just the one NestJS's `ConfigModule` reads, before running any Prisma CLI
+command or test suite locally.
 
 ## CI/CD
 

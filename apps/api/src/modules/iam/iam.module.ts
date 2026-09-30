@@ -11,6 +11,7 @@ import { MfaService } from './services/mfa.service';
 import { RolesService } from './services/roles.service';
 import { OrganizationsService } from './services/organizations.service';
 import { SecurityEventsService } from './services/security-events.service';
+import { IdentityService } from './services/identity.service';
 import { AuthController } from './controllers/auth.controller';
 import { UsersController } from './controllers/users.controller';
 import { RolesController } from './controllers/roles.controller';
@@ -18,6 +19,7 @@ import { OrganizationsController } from './controllers/organizations.controller'
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
+import { SignatureGuard } from './guards/signature.guard';
 import { AuditModule } from '../audit/audit.module';
 
 @Module({
@@ -45,13 +47,17 @@ import { AuditModule } from '../audit/audit.module';
     RolesService,
     OrganizationsService,
     SecurityEventsService,
+    IdentityService,
     JwtStrategy,
     // Registered globally so every route requires authentication (Zero
     // Trust) and declared permissions are enforced, without every module
-    // having to remember to attach the guards itself.
+    // having to remember to attach the guards itself. SignatureGuard is a
+    // no-op unless a route is decorated with @RequireSignature(), same
+    // pattern as PermissionsGuard.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    { provide: APP_GUARD, useClass: SignatureGuard },
   ],
-  exports: [UsersService, SecurityEventsService],
+  exports: [UsersService, SecurityEventsService, IdentityService],
 })
 export class IamModule {}

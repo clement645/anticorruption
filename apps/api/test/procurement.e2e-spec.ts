@@ -4,8 +4,10 @@ import cookieParser from 'cookie-parser';
 import * as argon2 from 'argon2';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { generateEd25519KeyPair } from '@bpfmps/crypto';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { signRequest } from './helpers/signing';
 
 interface LoginResponseBody {
   accessToken: string;
@@ -51,6 +53,7 @@ describe('Procurement (e2e)', () => {
   let adminUserId: string;
   let noPermUserId: string;
   let adminToken: string;
+  let adminPrivateKeyPem: string;
   let noPermToken: string;
   let orgId: string;
   let roleId: string;
@@ -171,6 +174,14 @@ describe('Procurement (e2e)', () => {
       .expect(200);
     adminToken = (adminLogin.body as LoginResponseBody).accessToken;
 
+    const adminKeyPair = generateEd25519KeyPair();
+    adminPrivateKeyPem = adminKeyPair.privateKeyPem;
+    await request(app.getHttpServer())
+      .post('/api/v1/users/me/signing-key')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ publicKeyPem: adminKeyPair.publicKeyPem })
+      .expect(201);
+
     const noPermLogin = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .send({ email: noPermEmail, password })
@@ -218,6 +229,13 @@ describe('Procurement (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/approve`)
       .set('Authorization', `Bearer ${adminToken}`)
+      .send(
+        signRequest(
+          'POST',
+          `/api/v1/budgets/${budgetId}/approve`,
+          adminPrivateKeyPem,
+        ),
+      )
       .expect(200);
     const allocations = await request(app.getHttpServer())
       .get('/api/v1/allocations')

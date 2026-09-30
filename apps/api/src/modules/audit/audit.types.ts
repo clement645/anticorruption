@@ -13,6 +13,12 @@ export interface AppendAuditEventInput {
   userAgent?: string;
   requestId?: string;
   correlationId?: string;
+  // Set only for routes decorated with @RequireSignature() — the actor's own
+  // per-official Ed25519 signature (see SignatureGuard), distinct from the
+  // system-wide chain-integrity `signature` this event always gets below.
+  actorSignature?: string;
+  actorKeyId?: string;
+  actorSignedPayload?: string;
 }
 
 /** JSON-safe view of an AuditEvent row — `sequence` (BigInt) is a string here. */
@@ -33,6 +39,9 @@ export interface AuditEventView {
   currentHash: string;
   signature: string;
   signatureKeyId: string;
+  actorSignature: string | null;
+  actorKeyId: string | null;
+  actorSignedPayload: string | null;
   ipAddress: string | null;
   userAgent: string | null;
   requestId: string | null;
@@ -59,6 +68,11 @@ export interface EventVerificationResult {
     chainLinkValid: boolean;
     currentHashValid: boolean;
     signatureValid: boolean;
+    // null when this event has no actorSignature at all (most events —
+    // only @RequireSignature() routes populate one); true/false only when
+    // one is present and was (or wasn't) verified against its exact
+    // historical DigitalIdentity key.
+    actorSignatureValid: boolean | null;
   };
   verified: boolean;
 }

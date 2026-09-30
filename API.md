@@ -103,7 +103,27 @@ Paginated user list (`?skip=&take=`).
 
 ### `POST /api/v1/users` — requires `users:create`
 Admin-created user with an administrator-set temporary password (no invite-email flow
-yet — see IMPLEMENTATION_PLAN.md Phase 2 follow-ups).
+yet — see IMPLEMENTATION_PLAN.md Phase 2 follow-ups). Body includes `roleIds` (at
+least one) and optional `organizationId`/`departmentId`.
+
+### `PATCH /api/v1/users/:id` — requires `users:update`
+Admin user-management endpoint added alongside the User Management frontend view
+(post-Phase-14 work). Body: any of `roleIds` (fully replaces the user's role set —
+not diffed), `status` (`ACTIVE`/`SUSPENDED`/`LOCKED`/`PENDING_ACTIVATION`),
+`organizationId`, `departmentId`. An actor cannot change their own `status` (403) —
+prevents an admin from locking themselves out. 404 if the target user doesn't exist.
+Emits a `USER_UPDATED` security event and audit entry.
+
+### `GET /api/v1/users/me/signing-key`
+Returns `{ enrolled: false }` or `{ enrolled: true, keyId, algorithm, createdAt }` for
+the caller's own currently-active per-official signing key (see SECURITY.md § Digital
+Signatures).
+
+### `POST /api/v1/users/me/signing-key`
+Body: `{ publicKeyPem }` — an Ed25519 public key, SPKI/PEM-encoded, generated
+CLIENT-SIDE by the caller (never the server). Enrolls it as the caller's new active
+signing key, revoking (not deleting) any previous one. `400` if the key isn't a valid
+Ed25519 SPKI/PEM public key.
 
 ### `POST /api/v1/users/me/mfa/totp/setup`
 Generates a new TOTP secret (stored encrypted, not yet active) and returns
@@ -242,10 +262,15 @@ voteName, programName, subProgramName?, description, authorizedAmount }] }`. Cre
 ### `POST /api/v1/budgets/:id/submit` (`budget:create`)
 `DRAFT → PENDING_APPROVAL`. `400` if the budget isn't currently `DRAFT`.
 
-### `POST /api/v1/budgets/:id/approve` (`budget:approve`)
+### `POST /api/v1/budgets/:id/approve` (`budget:approve`, requires a personal digital signature)
 `PENDING_APPROVAL → APPROVED`, and atomically creates one `Allocation` per
 `BudgetLine` — the "Digital Budget Entitlement" (section 10). `400` if not currently
-`PENDING_APPROVAL`.
+`PENDING_APPROVAL`. Body must include `signature`, `signatureTimestamp`,
+`signatureNonce` — see SECURITY.md § Digital Signatures. `400` if these are missing or
+the timestamp is stale (>5 min); `403` if the signature doesn't verify against the
+actor's enrolled key, the actor has no enrolled key, or the nonce was already used
+(replay). The resulting `BUDGET_APPROVED` audit event carries `actorSignature`/
+`actorKeyId` in addition to the system chain signature every event already has.
 
 ### `POST /api/v1/budgets/:id/reject` (`budget:approve`)
 Body: `{ reason? }`. `PENDING_APPROVAL → REJECTED`.
@@ -311,6 +336,9 @@ estimatedAmount }`. `400` if the plan is not `APPROVED`. Creates a `DRAFT` reque
 referenced `Allocation` by calling Phase 5's `AllocationsService.createCommitment()` —
 `409` if the allocation's available balance can't cover `estimatedAmount` (same
 row-locked check budget's own commitments use, see DATABASE.md § Current State).
+`409` also if this request is named in an unresolved HIGH-severity split-procurement
+alert (post-launch legal/policy integration layer — see SECURITY.md § Legal & Policy
+Integration) — an Auditor must review it (`risk:review`) first.
 
 ### `POST /api/v1/procurement-requests/:id/reject` (`procurement:approve`)
 `SUBMITTED → REJECTED`.
@@ -469,8 +497,14 @@ Body: `{ poNumber, description, amount }`. `400` if the contract is not `ACTIVE`
 
 ### `POST /api/v1/purchase-orders/:id/invoices` (`invoice:submit`)
 Body: `{ invoiceNumber, amount, dueDate?, items: [{ description, quantity, unitPrice,
-amount }] }`. `400` if the PO is not `ISSUED`. No supplier self-service portal exists
-yet — this records an invoice on the supplier's behalf, submitted by internal staff.
+amount }] }`. `400` if the PO is not `ISSUED`. `409` if this invoice would push the
+PO's cumulative non-rejected invoiced total past its authorized amount (post-launch
+legal/policy integration layer — see SECURITY.md § Legal & Policy Integration). No
+supplier self-service portal exists yet — this records an invoice on the supplier's
+behalf, submitted by internal staff. After creation, `DuplicatePaymentDetector` checks
+whether this supplier has another invoice at the identical amount within
+`RISK_DUPLICATE_PAYMENT_WINDOW_DAYS` and raises a `DUPLICATE_PAYMENT` risk alert if so
+(detection only, does not block the invoice).
 
 ### `GET /api/v1/invoices` · `GET /api/v1/invoices/:id` (`invoice:read`)
 
@@ -685,6 +719,17 @@ Body: `{ status: "UNDER_REVIEW"|"SUBSTANTIATED"|"UNSUBSTANTIATED" }`.
 Body: `{ message }`. Adds an `INVESTIGATOR`-authored entry, `postedById` set to
 the calling investigator — visible to the reporter on their next tracking-code
 status check.
+
+## Legal & Policy Integration Layer (post-launch)
+
+### `GET /api/v1/compliance/rules`
+Public, unauthenticated — returns the full citable compliance-rule registry (see
+`apps/api/src/modules/compliance/compliance-rules.ts` and SECURITY.md § Legal & Policy
+Integration). Each entry: `{ id, title, citation, verifiedAgainst, description,
+enforcement, enforcedBy }`, where `enforcement` is one of `preventive` (can block an
+action — currently only the split-procurement gate), `detective` (flags for human
+review), or `design-principle` (a documented provision this system deliberately does
+not hard-code a specific number for — see the field's own `description` for why).
 
 ## OpenAPI / Swagger
 

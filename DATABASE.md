@@ -184,6 +184,30 @@ habit) is deliberate, not inconsistency. Verified under a 10-way concurrent comm
 stress test: exactly the number of requests that fit the ceiling succeeded, the rest
 correctly rejected, with zero overshoot (see IMPLEMENTATION_PLAN.md Phase 5).
 
+**Post-launch: per-official digital signatures.** `digital_identities` existed since
+Phase 2 as a deliberate placeholder (comment: "populated once application-level
+signing keys are issued") but was never written to by any code path until now. Two
+schema additions wire it up: `signature_nonces` (a new table — `nonce` is `@unique`,
+which is the actual replay-defense mechanism, not an index alongside a separate
+check) and two new nullable columns on `audit_events` (`actorSignature`, `actorKeyId`,
+`actorSignedPayload` — distinct from the pre-existing system-wide `signature`/
+`signatureKeyId` columns, which prove the log wasn't tampered with, not that a specific
+person authorized a specific action). `actorSignedPayload` stores the exact canonical
+string that was signed, verbatim — deliberately not reconstructed at verification time,
+since nothing else on the row reliably reproduces it later. See SECURITY.md § Digital
+Signatures for the full design and API.md for the new `/users/me/signing-key`
+endpoints and the first real `@RequireSignature()` wiring (`POST /budgets/:id/approve`).
+
+**Post-launch: duplicate-payment detector.** One small addition — `DUPLICATE_PAYMENT`
+added to the `RiskDetectorType` enum (`risk_alerts.detectorType`) — no new table. The
+companion hard preventive control (a purchase order's cumulative invoiced amount
+cannot exceed its authorized amount) needed no schema change at all: it's computed by
+summing existing `invoices.amount` rows at request time in `InvoicesService.create()`,
+the same "derive server-side, don't trust client input" pattern used throughout this
+project (Contract deriving its budget line from Award, Project deriving
+`organizationId` from Contract, etc.) rather than a stored, cacheable running total
+that could drift from the underlying rows.
+
 Phase 6 introduces a **third** concurrency-safety mechanism alongside the two above —
 a DB unique constraint for "create exactly once" — rather than defaulting to either the
 advisory-lock or row-lock pattern out of habit (see § 4 Conventions above). It also
