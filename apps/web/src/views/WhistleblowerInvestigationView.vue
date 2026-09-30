@@ -57,7 +57,7 @@ function nextStatuses(current: string): string[] {
       </p>
     </div>
 
-    <p v-if="store.error" class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+    <p v-if="store.error" class="mt-4 alert-error">
       {{ store.error }}
     </p>
 

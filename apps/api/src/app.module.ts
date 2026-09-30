@@ -13,6 +13,8 @@ import { IamModule } from './modules/iam/iam.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { BlockchainModule } from './modules/blockchain/blockchain.module';
 import { StorageModule } from './modules/storage/storage.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { MarketDataModule } from './modules/market-data/market-data.module';
 import { BudgetModule } from './modules/budget/budget.module';
 import { ProcurementModule } from './modules/procurement/procurement.module';
 import { SupplierModule } from './modules/supplier/supplier.module';
@@ -22,6 +24,7 @@ import { ProjectsModule } from './modules/projects/projects.module';
 import { TransparencyModule } from './modules/transparency/transparency.module';
 import { WhistleblowerModule } from './modules/whistleblower/whistleblower.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
+import { AccountabilityModule } from './modules/accountability/accountability.module';
 
 @Module({
   imports: [
@@ -91,6 +94,8 @@ import { ComplianceModule } from './modules/compliance/compliance.module';
     AuditModule,
     BlockchainModule,
     StorageModule,
+    NotificationsModule,
+    MarketDataModule,
     IamModule,
     BudgetModule,
     ProcurementModule,
@@ -101,6 +106,7 @@ import { ComplianceModule } from './modules/compliance/compliance.module';
     TransparencyModule,
     WhistleblowerModule,
     ComplianceModule,
+    AccountabilityModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

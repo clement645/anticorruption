@@ -85,6 +85,7 @@ jobs:
             const pubPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
             const out = [
               'JWT_SECRET=' + crypto.randomBytes(48).toString('base64'),
+              'STEP_UP_TOKEN_SECRET=' + crypto.randomBytes(48).toString('base64'),
               'MFA_ENCRYPTION_KEY=' + crypto.randomBytes(32).toString('base64'),
               'EVIDENCE_ENCRYPTION_KEY=' + crypto.randomBytes(32).toString('base64'),
               'WHISTLEBLOWER_CONTACT_ENCRYPTION_KEY=' + crypto.randomBytes(32).toString('base64'),

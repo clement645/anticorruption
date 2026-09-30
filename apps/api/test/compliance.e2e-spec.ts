@@ -67,9 +67,12 @@ describe('Compliance Rule Registry (e2e)', () => {
     for (const rule of rules) {
       expect(rule.id).toEqual(expect.any(String));
       expect(rule.citation.length).toBeGreaterThan(0);
-      expect(['preventive', 'detective', 'design-principle']).toContain(
-        rule.enforcement,
-      );
+      expect([
+        'preventive',
+        'detective',
+        'design-principle',
+        'transparency',
+      ]).toContain(rule.enforcement);
       expect(rule.enforcedBy.length).toBeGreaterThan(0);
     }
   });

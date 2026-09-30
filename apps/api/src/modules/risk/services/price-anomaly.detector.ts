@@ -1,7 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { RiskAlertsService } from './risk-alerts.service';
+import { MARKET_DATA_ADAPTER } from '../../market-data/market-data.constants';
+import type { MarketDataAdapter } from '../../market-data/market-data.types';
 import type { DetectionResult } from '../risk.types';
+import type { EnvConfig } from '../../../config/env.validation';
 import {
   PRICE_ANOMALY_ESTIMATE_DEVIATION_THRESHOLD,
   PRICE_ANOMALY_MIN_BIDS_FOR_ZSCORE,
@@ -28,6 +32,16 @@ import {
  * 200,000 bid alongside three ~990,000 bids scored |z|≈1.7 — below the
  * MEDIUM threshold — under the naive approach) and fixed by scoring each
  * bid against its peers rather than against a population it's a member of.
+ *
+ * Post-launch (item 7) adds one more, orthogonal check: the peer-bid
+ * z-score above only catches a bid that stands out AMONG this lot's OWN
+ * bidders — it cannot catch every bidder colluding to submit similarly
+ * inflated prices, since there would be no outlier relative to that
+ * (rigged) peer set. Comparing the lot's own pre-tender ESTIMATE against
+ * an independent live market reference price closes exactly that gap —
+ * see evaluateMarketPriceDeviation() below. Only ever fires once a real
+ * MarketDataAdapter is plugged in (the default LogOnlyMarketDataAdapter
+ * always returns null, so this is a no-op today — see market-data.module.ts).
  */
 @Injectable()
 export class PriceAnomalyDetector {
@@ -36,6 +50,9 @@ export class PriceAnomalyDetector {
   constructor(
     private readonly prisma: PrismaService,
     private readonly riskAlertsService: RiskAlertsService,
+    @Inject(MARKET_DATA_ADAPTER)
+    private readonly marketDataAdapter: MarketDataAdapter,
+    private readonly config: ConfigService<EnvConfig, true>,
   ) {}
 
   async evaluateLot(tenderLotId: string): Promise<void> {
@@ -44,7 +61,19 @@ export class PriceAnomalyDetector {
         where: { id: tenderLotId },
         include: { bids: true },
       });
-      if (!lot || lot.bids.length === 0) {
+      if (!lot) {
+        return;
+      }
+
+      // Independent of bid count/existence — this compares the lot's own
+      // estimate against a live market reference, not against its bids.
+      await this.evaluateMarketPriceDeviation(
+        lot.id,
+        lot.description,
+        Number(lot.estimatedAmount),
+      );
+
+      if (lot.bids.length === 0) {
         return;
       }
 
@@ -125,6 +154,70 @@ export class PriceAnomalyDetector {
       // decision fails to be enforced" (see PermissionsGuard).
       this.logger.error(
         `Price anomaly detection failed for lot ${tenderLotId}`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * The one check in this detector that never looks at bids — see the
+   * class doc comment for why this catches a pattern the peer-bid z-score
+   * structurally cannot (every bidder colluding to submit similarly
+   * inflated prices). A separate try/catch from evaluateLot()'s own: a
+   * market-data lookup failure must never prevent the peer-bid/estimate
+   * checks below it from still running.
+   */
+  private async evaluateMarketPriceDeviation(
+    tenderLotId: string,
+    description: string,
+    estimatedAmount: number,
+  ): Promise<void> {
+    try {
+      const reference =
+        await this.marketDataAdapter.getReferencePrice(description);
+      if (!reference || reference.price <= 0) {
+        return;
+      }
+
+      const deviation =
+        Math.abs(estimatedAmount - reference.price) / reference.price;
+      const threshold = this.config.get(
+        'RISK_MARKET_PRICE_DEVIATION_THRESHOLD',
+        {
+          infer: true,
+        },
+      );
+      if (deviation <= threshold) {
+        return;
+      }
+
+      const severity = deviation > threshold * 2 ? 'HIGH' : 'MEDIUM';
+      await this.riskAlertsService.raiseAlert(
+        'MARKET_PRICE_DEVIATION',
+        'TenderLot',
+        tenderLotId,
+        {
+          severity,
+          title: 'Tender estimate deviates from live market reference price',
+          description:
+            `This lot's estimated amount ${estimatedAmount} deviates by ` +
+            `${(deviation * 100).toFixed(1)}% from an independent market reference ` +
+            `price of ${reference.price} ${reference.currency} (source: ${reference.source}, as of ${reference.asOf}).`,
+          evidence: {
+            tenderLotId,
+            estimatedAmount,
+            referencePrice: reference.price,
+            referenceCurrency: reference.currency,
+            referenceSource: reference.source,
+            referenceAsOf: reference.asOf,
+            deviationFraction: deviation,
+            thresholdFraction: threshold,
+          },
+        },
+      );
+    } catch (error) {
+      this.logger.error(
+        `Market price deviation check failed for lot ${tenderLotId}`,
         error,
       );
     }

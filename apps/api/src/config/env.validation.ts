@@ -39,6 +39,18 @@ export const envSchema = z.object({
     .int()
     .positive()
     .default(15),
+  // Step-up MFA (post-launch): a distinct secret from JWT_SECRET, deliberately —
+  // key separation per purpose (same reasoning as MFA_ENCRYPTION_KEY vs
+  // EVIDENCE_ENCRYPTION_KEY vs WHISTLEBLOWER_CONTACT_ENCRYPTION_KEY below), so a
+  // step-up assertion can never be forged or replayed as an ordinary access
+  // token, or vice versa, even if one secret were somehow compromised.
+  STEP_UP_TOKEN_SECRET: z
+    .string()
+    .min(
+      32,
+      'STEP_UP_TOKEN_SECRET must be at least 32 characters — generate with: openssl rand -base64 64',
+    ),
+  STEP_UP_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(600),
   MFA_ENCRYPTION_KEY: z
     .string()
     .min(
@@ -94,6 +106,49 @@ export const envSchema = z.object({
     .int()
     .positive()
     .default(90),
+
+  // GPS-tagged evidence capture (post-launch): the maximum straight-line
+  // distance (meters, haversine) between a piece of evidence's captured
+  // GPS coordinates and its project's declared `siteLatitude`/
+  // `siteLongitude` before EvidenceLocationDetector raises a MEDIUM alert
+  // (HIGH beyond 10x this figure — see the detector's own comment). 500m
+  // default is deliberately generous: consumer-grade GPS drift is normally
+  // under ~50m, but large project sites (a road corridor, a multi-hectare
+  // facility) legitimately span hundreds of meters — this should catch
+  // "evidence from a different location entirely", not "stood at the far
+  // edge of a big site".
+  RISK_EVIDENCE_LOCATION_MISMATCH_METERS: z.coerce
+    .number()
+    .positive()
+    .default(500),
+
+  // Live market-data pricing (post-launch, item 7): the maximum fraction a
+  // tender lot's own estimate may diverge from an independent market
+  // reference price before MarketPriceDeviationDetector raises a MEDIUM
+  // alert (HIGH beyond 2x this figure). A genuine POLICY threshold (unlike
+  // the statistical constants in risk.constants.ts) — deliberately generous
+  // (30%) since region/quality/urgency legitimately move real prices, and
+  // this should catch "the estimate looks nothing like the real market",
+  // not ordinary price variance. Only ever evaluated when a real
+  // MarketDataAdapter actually returns a reference price — the default
+  // LogOnlyMarketDataAdapter always returns null, so this check never fires
+  // until a real provider is plugged in (see market-data.module.ts).
+  RISK_MARKET_PRICE_DEVIATION_THRESHOLD: z.coerce
+    .number()
+    .positive()
+    .default(0.3),
+
+  // Push notifications (post-launch, item 7): comma-separated recipient
+  // lists per channel, each optional and empty by default — WHO should be
+  // notified is a genuine deployment/policy decision nothing in this
+  // codebase can make on an operator's behalf. Real delivery requires a
+  // third-party account (Twilio/Telegram bot token/WhatsApp Business API)
+  // this project doesn't have, so LogOnlyNotificationAdapter never actually
+  // contacts any of these regardless of what's configured here — see
+  // notifications.module.ts.
+  NOTIFICATION_RECIPIENTS_SMS: z.string().optional().default(''),
+  NOTIFICATION_RECIPIENTS_TELEGRAM: z.string().optional().default(''),
+  NOTIFICATION_RECIPIENTS_WHATSAPP: z.string().optional().default(''),
 
   // Evidence vault / object storage (Phase 10). ARCHITECTURE.md § 7 always
   // described "large documents live in encrypted object storage, only their

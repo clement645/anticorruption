@@ -1,5 +1,7 @@
 import {
   IsDateString,
+  IsLatitude,
+  IsLongitude,
   IsOptional,
   IsString,
   IsUUID,
@@ -21,6 +23,15 @@ export class CreateProjectDto {
   @IsOptional()
   @IsString()
   location?: string;
+
+  /** Known site coordinates (post-launch, GPS-tagged evidence capture) — manually supplied, never geocoded. */
+  @IsOptional()
+  @IsLatitude()
+  siteLatitude?: number;
+
+  @IsOptional()
+  @IsLongitude()
+  siteLongitude?: number;
 
   @IsDateString()
   startDate!: string;

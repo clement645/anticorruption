@@ -87,23 +87,23 @@ function formatCategory(category: string): string {
     <nav class="mt-6 flex gap-1 border-b border-slate-200 text-sm">
       <button
         type="button"
-        class="rounded-t-lg px-3 py-2"
-        :class="activeTab === 'submit' ? 'border-b-2 border-brand-600 font-medium text-brand-700' : 'text-slate-500 hover:text-slate-800'"
+        class="tab-pill"
+        :class="activeTab === 'submit' ? 'tab-pill-active' : 'tab-pill-inactive'"
         @click="activeTab = 'submit'"
       >
         Submit a report
       </button>
       <button
         type="button"
-        class="rounded-t-lg px-3 py-2"
-        :class="activeTab === 'status' ? 'border-b-2 border-brand-600 font-medium text-brand-700' : 'text-slate-500 hover:text-slate-800'"
+        class="tab-pill"
+        :class="activeTab === 'status' ? 'tab-pill-active' : 'tab-pill-inactive'"
         @click="activeTab = 'status'"
       >
         Check status / add information
       </button>
     </nav>
 
-    <p v-if="store.error" class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+    <p v-if="store.error" class="mt-4 alert-error">
       {{ store.error }}
     </p>
 
@@ -115,7 +115,7 @@ function formatCategory(category: string): string {
           Your tracking code — save this now, it will not be shown again and cannot be recovered:
         </p>
         <div class="mt-2 flex items-center gap-2">
-          <code class="flex-1 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm">{{
+          <code class="flex-1 rounded-md border border-emerald-300 bg-white px-3 py-2 font-mono text-sm">{{
             store.submittedTrackingCode
           }}</code>
           <button type="button" class="btn btn-secondary btn-sm text-emerald-700" @click="copyTrackingCode">

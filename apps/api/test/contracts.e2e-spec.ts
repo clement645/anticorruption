@@ -8,6 +8,7 @@ import { generateEd25519KeyPair } from '@bpfmps/crypto';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { signRequest } from './helpers/signing';
+import { enrollTotp, issueStepUpToken } from './helpers/step-up';
 
 interface LoginResponseBody {
   accessToken: string;
@@ -79,6 +80,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
   let approver3UserId: string;
   let noPermUserId: string;
   let fullToken: string;
+  let fullTotpSecret: string;
   let fullPrivateKeyPem: string;
   let approver1Token: string;
   let approver2Token: string;
@@ -259,6 +261,11 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .set('Authorization', `Bearer ${fullToken}`)
       .send({ publicKeyPem: fullKeyPair.publicKeyPem })
       .expect(201);
+
+    // payment-requests/:id/execute is @RequireStepUp() (post-launch) — the
+    // fixture user needs real TOTP MFA enrolled so execute() calls below can
+    // present a fresh X-Step-Up-Token.
+    fullTotpSecret = await enrollTotp(app.getHttpServer(), fullToken);
 
     approver1Token = await login(approver1Email);
     approver2Token = await login(approver2Email);
@@ -702,7 +709,14 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .send({
         invoiceNumber: `E2E-INV-CEILING-A-${Date.now()}`,
         amount: 300_000,
-        items: [{ description: 'x', quantity: 1, unitPrice: 300_000, amount: 300_000 }],
+        items: [
+          {
+            description: 'x',
+            quantity: 1,
+            unitPrice: 300_000,
+            amount: 300_000,
+          },
+        ],
       })
       .expect(201);
 
@@ -713,7 +727,14 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .send({
         invoiceNumber: `E2E-INV-CEILING-B-${Date.now()}`,
         amount: 300_000,
-        items: [{ description: 'x', quantity: 1, unitPrice: 300_000, amount: 300_000 }],
+        items: [
+          {
+            description: 'x',
+            quantity: 1,
+            unitPrice: 300_000,
+            amount: 300_000,
+          },
+        ],
       })
       .expect(409);
 
@@ -724,7 +745,14 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .send({
         invoiceNumber: `E2E-INV-CEILING-C-${Date.now()}`,
         amount: 200_000,
-        items: [{ description: 'x', quantity: 1, unitPrice: 200_000, amount: 200_000 }],
+        items: [
+          {
+            description: 'x',
+            quantity: 1,
+            unitPrice: 200_000,
+            amount: 200_000,
+          },
+        ],
       })
       .expect(201);
   });
@@ -770,7 +798,14 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .send({
         invoiceNumber: `E2E-INV-DUPE-A-${Date.now()}`,
         amount: 400_000,
-        items: [{ description: 'x', quantity: 1, unitPrice: 400_000, amount: 400_000 }],
+        items: [
+          {
+            description: 'x',
+            quantity: 1,
+            unitPrice: 400_000,
+            amount: 400_000,
+          },
+        ],
       })
       .expect(201);
 
@@ -783,7 +818,14 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .send({
         invoiceNumber: `E2E-INV-DUPE-B-${Date.now()}`,
         amount: 400_000,
-        items: [{ description: 'x', quantity: 1, unitPrice: 400_000, amount: 400_000 }],
+        items: [
+          {
+            description: 'x',
+            quantity: 1,
+            unitPrice: 400_000,
+            amount: 400_000,
+          },
+        ],
       })
       .expect(201);
     const secondInvoiceId = (secondInvoice.body as InvoiceBody).id;
@@ -933,15 +975,22 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
     const spentBefore = Number((before.body as AllocationBody).spentAmount);
+    const stepUpToken = await issueStepUpToken(
+      app.getHttpServer(),
+      fullToken,
+      fullTotpSecret,
+    );
 
     await request(app.getHttpServer())
       .post(`/api/v1/payment-requests/${paymentRequestId}/execute`)
       .set('Authorization', `Bearer ${fullToken}`)
+      .set('X-Step-Up-Token', stepUpToken)
       .expect(400); // missing Idempotency-Key
 
     const payment = await request(app.getHttpServer())
       .post(`/api/v1/payment-requests/${paymentRequestId}/execute`)
       .set('Authorization', `Bearer ${fullToken}`)
+      .set('X-Step-Up-Token', stepUpToken)
       .set('Idempotency-Key', `e2e-exec-${paymentRequestId}`)
       .expect(200);
     const paymentBody = payment.body as PaymentBody;
@@ -989,10 +1038,16 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
         .send({ decision: 'APPROVE' })
         .expect(201);
 
+      const stepUpToken = await issueStepUpToken(
+        app.getHttpServer(),
+        fullToken,
+        fullTotpSecret,
+      );
       const key = `e2e-replay-${paymentRequestId}`;
       const first = await request(app.getHttpServer())
         .post(`/api/v1/payment-requests/${paymentRequestId}/execute`)
         .set('Authorization', `Bearer ${fullToken}`)
+        .set('X-Step-Up-Token', stepUpToken)
         .set('Idempotency-Key', key)
         .expect(200);
 
@@ -1001,6 +1056,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       const replay = await request(app.getHttpServer())
         .post(`/api/v1/payment-requests/${paymentRequestId}/execute`)
         .set('Authorization', `Bearer ${fullToken}`)
+        .set('X-Step-Up-Token', stepUpToken)
         .set('Idempotency-Key', key)
         .expect(200);
 
@@ -1013,6 +1069,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       await request(app.getHttpServer())
         .post(`/api/v1/payment-requests/${paymentRequestId}/execute`)
         .set('Authorization', `Bearer ${fullToken}`)
+        .set('X-Step-Up-Token', stepUpToken)
         .set('Idempotency-Key', `${key}-different`)
         .expect(400);
     },
@@ -1034,11 +1091,17 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .send({ decision: 'APPROVE' })
       .expect(201);
 
+    const stepUpToken = await issueStepUpToken(
+      app.getHttpServer(),
+      fullToken,
+      fullTotpSecret,
+    );
     const key = `e2e-concurrent-${paymentRequestId}`;
     const attempts = Array.from({ length: 5 }, () =>
       request(app.getHttpServer())
         .post(`/api/v1/payment-requests/${paymentRequestId}/execute`)
         .set('Authorization', `Bearer ${fullToken}`)
+        .set('X-Step-Up-Token', stepUpToken)
         .set('Idempotency-Key', key),
     );
     const results = await Promise.all(attempts);

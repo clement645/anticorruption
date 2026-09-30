@@ -208,6 +208,49 @@ project (Contract deriving its budget line from Award, Project deriving
 `organizationId` from Contract, etc.) rather than a stored, cacheable running total
 that could drift from the underlying rows.
 
+**Post-launch: public accountability scorecards.** No schema change at all — the
+entire feature is computed at request time from existing foreign keys
+(`BudgetPlan.approvedById`, `ProcurementRequest.approvedById`, `Award.awardedById`,
+`Invoice.verifiedById`, `PaymentApproval.approvedById`, `Inspection.inspectedById`),
+cross-referenced against `risk_alerts.resourceType`/`resourceId`. Same "derive, don't
+store" judgment as the duplicate-payment ceiling above — a stored, periodically
+recomputed scorecard table was deliberately not built, since the underlying data
+volume is small enough that a live query is both simpler and never stale.
+
+**Post-launch: step-up MFA.** No schema change at all — a step-up assertion is a
+stateless signed JWT (`STEP_UP_TOKEN_SECRET`, distinct from `JWT_SECRET`), verified
+purely by signature/expiry/subject match, the same statelessness as the existing
+access/refresh token design. No new table for "active step-up sessions"; the token's
+own `exp` claim (`STEP_UP_TOKEN_TTL_SECONDS`, default 10 minutes) is the entire
+lifecycle. See SECURITY.md § Step-Up MFA and API.md's `POST /auth/step-up` entry.
+
+**Post-launch: GPS-tagged evidence capture (item 6).** Two small additions, no new
+table. `project_evidence` gains four nullable columns (`latitude`, `longitude`,
+`gpsAccuracyMeters`, `capturedAt`) — all client-supplied and optional, preserved
+immutably once recorded, same "store what's given, never silently recompute" rule
+as `fileHash`. `projects` gains two nullable columns (`siteLatitude`,
+`siteLongitude`) — manually supplied at creation, deliberately never geocoded from
+the existing free-text `location` column (no external geocoding API is called).
+`RiskDetectorType` gains `EVIDENCE_LOCATION_MISMATCH`. The actual distance check
+(haversine, comparing evidence coordinates against the project's declared site) is
+pure computation at request time in `EvidenceLocationDetector` — no stored,
+cacheable distance figure, same "derive, don't store" judgment as the
+duplicate-payment ceiling and the accountability scorecards above. See
+SECURITY.md § GPS-Tagged Evidence Capture.
+
+**Post-launch: push notifications & live market-data pricing (item 7).** One enum
+addition, no new table: `RiskDetectorType` gains `MARKET_PRICE_DEVIATION`. Neither
+new adapter (`NotificationAdapter`, `MarketDataAdapter`) has any table of its
+own — a notification dispatch is recorded as an ordinary `AuditEvent`
+(`NOTIFICATION_DISPATCHED`), not a new domain table, since a log-only adapter has
+no delivery state worth persisting beyond what the audit trail already captures
+(and a real future adapter's own provider — Twilio, etc. — would be the actual
+system of record for delivery status, not this database). A market-data lookup
+has no persistence at all: `MarketDataAdapter.getReferencePrice()` is a pure,
+stateless request-time call, same "derive, don't store" judgment as every other
+computed check in this project. See SECURITY.md § Push Notifications & Live
+Market-Data Pricing.
+
 Phase 6 introduces a **third** concurrency-safety mechanism alongside the two above —
 a DB unique constraint for "create exactly once" — rather than defaulting to either the
 advisory-lock or row-lock pattern out of habit (see § 4 Conventions above). It also

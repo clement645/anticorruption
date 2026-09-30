@@ -1562,10 +1562,270 @@ and 9. Now that `Invoice`/`PurchaseOrder` (Phase 9) exist, built for real.
   isolation and the full suite passing cleanly end-to-end when run
   sequentially).
 
-Next up in the same "highest impact first" sequence: officer/politician
-accountability scorecards, citizen voting on project priorities, step-up
-MFA on other sensitive actions, and GPS-tagged evidence capture — see the
-gap analysis this phase's own planning turn produced for the full list and
-reasoning on what's genuinely buildable here vs. blocked on external
-accounts (SMS/Telegram/WhatsApp push, live market-data pricing) or physical
-infrastructure (drones/IoT, distributed international hosting).
+## Post-Launch — Public Accountability Scorecards (Item 4)
+
+Fourth item in the sequence: named, per-official scorecards (wishlist item
+14, "Politician & Officer Accountability Profiles").
+
+- **A real conflict found and surfaced before writing any code**: the
+  wishlist item says "publish these scorecards publicly," but Phase 12's
+  own Transparency Portal made a deliberate, explicit decision — "no
+  individual actor's identity — none of it, anywhere" — the opposite of
+  what a named scorecard requires. This wasn't a minor detail to route
+  around; it's a real, considered privacy/safety boundary this project set
+  for itself. Put to the user directly via AskUserQuestion rather than
+  assumed either way, with "internal only" (preserves the Phase 12
+  boundary) as the recommended default and "public, org-level aggregates
+  only" as a middle option. **User explicitly chose full public disclosure
+  with names**, reversing the Phase 12 boundary for this one surface. See
+  SECURITY.md § Public Accountability Scorecards for the full record of
+  that decision and why it's defensible (these are officials' OFFICIAL
+  actions — the same category of public record the Transparency Portal
+  already publishes for suppliers/tenders, just attributed to a person).
+- **New module** (`apps/api/src/modules/accountability/`), deliberately
+  SEPARATE from `transparency/` rather than added to it — so the
+  Transparency Portal's own "never any individual identity" invariant
+  stays true and undisturbed for its own routes; the exception lives in
+  its own module with its own explicit doc comment, not buried as a
+  special case in the file whose whole point is that no such case exists.
+- **Every metric computed live from real foreign keys** already written by
+  other modules (`BudgetPlan.approvedById`, `ProcurementRequest.
+  approvedById`, `Award.awardedById`, `Invoice.verifiedById`,
+  `PaymentApproval.approvedById`, `Inspection.inspectedById`) — no schema
+  change, no stored/cacheable figure that could drift from the underlying
+  rows, same judgment as item 3's over-invoicing ceiling. A
+  risk-flagged-action rate cross-references `RiskAlert.resourceType`/
+  `resourceId` against the official's own actioned resources (including,
+  for awards, the underlying Bid/TenderLot — an award counts as flagged if
+  either was) — publishing only the aggregate count/rate, never which
+  alert or its contents, since that's a separate operational-security
+  question from the identity question already decided.
+- Only users with at least one qualifying action appear in the list
+  (self-selecting — avoids listing every user with all-zero noise).
+- New compliance-registry entry (`public-accountability-scorecards`) —
+  required a 4th `enforcement` category (`transparency`: a live disclosure
+  mechanism, not a preventive/detective check) alongside the three item 2
+  established.
+- **Tests**: new `accountability.e2e-spec.ts` (3 cases: public/
+  unauthenticated access reflecting a real budget approval from setup;
+  a full award-lifecycle test confirming award count, vendor-diversity
+  ratio, and total-actions all reflect reality; 404 for a nonexistent
+  user). Full suite (15 files, 118 tests) passes.
+
+Next up in the same "highest impact first" sequence: citizen voting on
+project priorities, step-up MFA on other sensitive actions, and
+GPS-tagged evidence capture — see the gap analysis this phase's own
+planning turn produced for the full list and reasoning on what's genuinely
+buildable here vs. blocked on external accounts (SMS/Telegram/WhatsApp
+push, live market-data pricing) or physical infrastructure (drones/IoT,
+distributed international hosting).
+
+## Post-Launch — Step-Up MFA on Sensitive Actions (Item 5)
+
+Fifth item in the sequence — **citizen voting was explicitly skipped per
+direct user instruction** ("we exclude citizen voting .. proceed to
+step-up MFA on other sensitive actions"), not silently deprioritized; it
+remains scheduled, unbuilt, later in the same list.
+
+- **The gap this closes**: login-time MFA (Phase 2) only defends the
+  moment a session begins. A hijacked/stolen access token can be replayed
+  for its whole lifetime (default 15 minutes) without the attacker ever
+  touching the victim's MFA device. Step-up MFA requires a **fresh**
+  TOTP/backup code again, mid-session, before a small number of genuinely
+  high-stakes actions specifically.
+- **Two routes wired**, deliberately different domains to demonstrate
+  breadth rather than depth on one module: `POST
+  /payment-requests/:id/execute` (`payment:execute` — disbursing real
+  money) and `PATCH /users/:id` (`users:update` — a privilege-escalation
+  vector). Budget approval was deliberately NOT re-wired here — it already
+  carries the stronger per-official digital-signature requirement (item 1),
+  which subsumes step-up's guarantee for that one action.
+- **New primitives, following the exact pattern `@RequireSignature()`/
+  `SignatureGuard` (item 1) established**: `@RequireStepUp()` decorator,
+  `StepUpGuard` (a 4th global `APP_GUARD`, no-op unless the route carries
+  the decorator), `StepUpService` (issues/verifies the token), `POST
+  /auth/step-up` (requires an already-valid access token, NOT
+  `@Public()`, plus a fresh code; returns a short-lived
+  `{ stepUpToken, expiresIn }`), presented back via the `X-Step-Up-Token`
+  header.
+- **A genuine design choice, not an oversight**: a bounded "elevated
+  session" token (`STEP_UP_TOKEN_TTL_SECONDS`, default 10 minutes), not a
+  per-request signature. A signature proves WHO authorized one specific
+  request, non-repudiably, forever; a step-up token proves the holder had
+  the MFA device recently, for a bounded window. Requiring a fresh code on
+  every request in a batch of sensitive actions would be unusable, not
+  more secure — the two features solve different problems and are not
+  interchangeable.
+- **Key separation per purpose, again**: `STEP_UP_TOKEN_SECRET` is a
+  distinct secret from `JWT_SECRET`, deliberately — same discipline as
+  `MFA_ENCRYPTION_KEY`/`EVIDENCE_ENCRYPTION_KEY`/
+  `WHISTLEBLOWER_CONTACT_ENCRYPTION_KEY` elsewhere in this project — so a
+  step-up assertion can never be forged or replayed as an ordinary access
+  token, or vice versa.
+- An account without MFA enrolled cannot obtain a step-up token at all —
+  a deliberate forcing function, not an oversight: any role holding a
+  permission sensitive enough to need step-up should have MFA enrolled
+  regardless.
+- **No schema change / no migration** — step-up is a stateless signed JWT,
+  same statelessness as the existing access/refresh token design.
+- **Blast-radius check performed before wiring** (the lesson learned twice
+  earlier this session, from item 1 and the split-procurement gate):
+  grepped every e2e spec file for existing calls to both newly-protected
+  endpoints. Two files needed fixture updates — `contracts.e2e-spec.ts`
+  (6 calls to `payment-requests/:id/execute`, including a
+  missing-Idempotency-Key 400 check and a 5-way concurrency test, all of
+  which now enroll TOTP once in `beforeAll` and attach a fresh step-up
+  token) and `iam.e2e-spec.ts` (6 calls to `PATCH /users/:id` across the
+  admin-user-management suite, whose shared `loginAsAdmin()` helper now
+  transparently completes the MFA-verify step once TOTP is enrolled, since
+  every login after enrollment requires it). New shared
+  `test/helpers/step-up.ts` (`enrollTotp`, `issueStepUpToken`) — the same
+  role `helpers/signing.ts` plays for `@RequireSignature()`.
+- **Tests**: new `step-up.e2e-spec.ts` (6 cases, built against `PATCH
+  /users/:id` since it needs far lighter fixtures than payment execution:
+  no header, MFA not enabled, wrong TOTP code, full valid round-trip, a
+  step-up token belonging to a DIFFERENT user rejected even with valid
+  permissions, and an expired token crafted directly with the real
+  `STEP_UP_TOKEN_SECRET`). One new regression case added to
+  `iam.e2e-spec.ts` (missing step-up token rejected even with
+  `users:update`). Full suite (16 files, 125 tests) passes both
+  `--maxWorkers=2` and sequential `--maxWorkers=1`.
+
+Next up in the same sequence: GPS-tagged evidence capture, then the two
+log-only notification/market-data adapters (SMS/Telegram/WhatsApp push,
+live market-data pricing) — citizen voting remains explicitly deferred,
+not abandoned.
+
+## Post-Launch — GPS-Tagged Evidence Capture (Item 6)
+
+Sixth item in the sequence. Closes a real gap in Phase 10's evidence
+vault: nothing previously distinguished a genuine site photo from any
+other image file — a stock photo, a photo recycled from a different
+project, or a photo taken nowhere near the claimed site would be stored,
+hashed, and blockchain-anchored exactly as credibly as a real one.
+
+- **Two small, additive schema changes, no new table**: `ProjectEvidence`
+  gains four nullable columns (`latitude`, `longitude`,
+  `gpsAccuracyMeters`, `capturedAt`) and `Project` gains two
+  (`siteLatitude`, `siteLongitude`). Migration
+  `20260930113551_gps_tagged_evidence_capture`.
+- **Deliberately no geocoding**: a project's site coordinates are
+  manually supplied at creation, never derived from the existing
+  free-text `location` field via an external geocoding API — consistent
+  with this round's "build as pluggable adapters, log-only for now"
+  decision for features that need an external account; geocoding would be
+  another one, and the manual-entry version needs no external dependency
+  at all to deliver real value.
+- **New detector, following the exact `DuplicatePaymentDetector` (item 3)
+  pattern**: `EvidenceLocationDetector` — pure computation (haversine
+  distance, no external service), called non-blockingly after every
+  evidence upload. Only fires when BOTH the evidence's GPS and the
+  project's declared site coordinates are present and disagree by more
+  than `RISK_EVIDENCE_LOCATION_MISMATCH_METERS` (default 500m) — MEDIUM
+  severity, HIGH beyond 10x that margin (same same-PO/different-PO
+  severity-escalation shape as the duplicate-payment detector). Most
+  evidence will have neither field set and that alone is never flagged —
+  the check only fires on a genuine, present disagreement.
+- New `RiskDetectorType` value `EVIDENCE_LOCATION_MISMATCH`.
+- `ProjectsModule` now explicitly imports `RiskModule` (previously
+  didn't need to) so `EvidenceService` can call the new detector — the
+  same "domain module imports RiskModule for its own lifecycle's natural
+  trigger point" pattern `ContractsModule` already established for item 3.
+- Both `latitude`/`longitude` (evidence) and `siteLatitude`/
+  `siteLongitude` (project) are validated server-side as "supplied
+  together or not at all" (400 otherwise) — class-validator has no
+  built-in cross-field rule for this, so it's enforced explicitly in
+  `EvidenceService.upload()`/`ProjectsService.create()`.
+- **Tests**: 4 new cases in `projects.e2e-spec.ts` — GPS-tagged evidence
+  stored correctly with no alert when within the site margin; an
+  `EVIDENCE_LOCATION_MISMATCH` HIGH alert raised (upload still succeeds,
+  never blocked) for evidence ~180km from the declared site; latitude
+  without longitude rejected on both evidence upload and project
+  creation. Full suite (16 files, 129 tests) passes both
+  `--maxWorkers=2` and sequential `--maxWorkers=1`.
+- New `gps-tagged-evidence-capture` compliance-registry entry (detective
+  enforcement, Article 227(1) + general PFM Act principle, same honesty
+  pattern as the other general-principle entries in that registry).
+
+Next up in the same sequence: the two log-only notification/market-data
+adapters (SMS/Telegram/WhatsApp push, live market-data pricing) —
+citizen voting remains explicitly deferred, not abandoned.
+
+## Post-Launch — Push Notifications & Live Market-Data Pricing (Item 7)
+
+Seventh and final item in the "highest impact first" post-launch sequence
+— the two features the user identified up front as needing external
+accounts, built per that earlier decision: "build as pluggable adapters,
+log-only for now" (Recommended, chosen over building nothing at all).
+
+- **Two new adapter interfaces, `NotificationAdapter` and
+  `MarketDataAdapter`**, each with exactly one implementation today
+  (`LogOnlyNotificationAdapter`, `LogOnlyMarketDataAdapter`) — same
+  pluggable-adapter shape as `BlockchainAdapter`/`ObjectStorageAdapter`,
+  but deliberately kept inside `apps/api/src/modules/notifications/` and
+  `.../market-data/` rather than promoted to their own workspace packages:
+  neither interface is consumed outside `apps/api`, and the blockchain/
+  storage package split was never actually about cross-app sharing either
+  (`apps/web` imports neither) — a single small module already delivers
+  the same swap-a-provider-later guarantee without the extra
+  workspace-package build overhead. This is a deliberate, noted deviation
+  from the established precedent, not an oversight.
+- **Notifications**: `NotificationsService` has exactly two purpose-built
+  trigger points (not a generic "send anything" API, so the discipline of
+  what's safe to include in a message body lives next to the trigger that
+  knows the answer):
+  - `RiskAlertsService.raiseAlert()` — only HIGH/CRITICAL severity.
+  - `WhistleblowerService.submitReport()` — carries the exact same
+    minimal fields (`reportId` + `category`) already on that action's own
+    audit event, never description/contact/organizationId. This is the
+    one action in the codebase that must never be attributable to anyone
+    (Phase 13) — a notification body needed the identical discipline, not
+    a separate judgment call.
+  - Every dispatch (whether 0 or many recipients configured) is recorded
+    as one `NOTIFICATION_DISPATCHED` audit event — not one per recipient/
+    channel, which would bloat the trail for what's always a no-op today.
+    This is deliberate: once a real adapter is plugged in, this same
+    trail becomes the actual delivery history.
+  - Recipients configured per channel via `NOTIFICATION_RECIPIENTS_SMS`/
+    `_TELEGRAM`/`_WHATSAPP` (comma-separated, empty by default in
+    `.env.example` — WHO gets notified is a deployment decision this
+    codebase can't make on an operator's behalf). This sandbox's own local
+    `apps/api/.env` (gitignored) sets one placeholder recipient per
+    channel so the full pipeline is genuinely exercised end to end in
+    tests, while remaining completely safe — `LogOnlyNotificationAdapter`
+    never actually contacts any of them regardless.
+- **Market data**: `PriceAnomalyDetector` gains
+  `evaluateMarketPriceDeviation()`, a new check orthogonal to its existing
+  peer-bid z-score — the peer check can only catch a bid that stands out
+  AMONG a lot's own bidders, structurally blind to every bidder colluding
+  on similarly inflated prices. Comparing the lot's own pre-tender
+  ESTIMATE against an independent market reference price catches that
+  different pattern instead (an inflated estimate crafted to justify
+  inflated bids, or a rigged sole-bidder award) — runs on every tender
+  close, independent of bid count. New `RiskDetectorType` value
+  `MARKET_PRICE_DEVIATION`; new policy threshold
+  `RISK_MARKET_PRICE_DEVIATION_THRESHOLD` (default 30%, deliberately
+  generous — a genuine POLICY constant in env.validation.ts, unlike the
+  fixed statistical constants in risk.constants.ts, per that file's own
+  documented split).
+  - **Never fires in this deployment** — `LogOnlyMarketDataAdapter` always
+    returns `null`, so the comparison never runs to completion. By
+    design: the full wiring (detector, alert type, audit trail) is built
+    and tested end to end, ready for a real provider to activate the
+    actual check with no other code changing.
+- Migration `20260930115320_market_price_deviation_detector` (enum value
+  only, no table).
+- **Tests**: 2 new cases in `risk.e2e-spec.ts` (a HIGH price-anomaly alert
+  dispatches a `NOTIFICATION_DISPATCHED` audit event with
+  `recipientCount: 3`/`delivered: false`; confirms zero
+  `MARKET_PRICE_DEVIATION` alerts ever fire against the always-empty
+  adapter — a safety/no-false-positive check, not a dead test). 1 new case
+  in `whistleblower.e2e-spec.ts` (report submission dispatches a
+  notification whose audit payload provably excludes the report's free
+  text). Full suite (16 files, 131 tests) passes.
+
+This completes the "highest anti-corruption impact first" post-launch
+sequence the user set at its start, with one deliberate, explicit
+exception: citizen voting on project priorities was skipped mid-sequence
+per direct user instruction ("we exclude citizen voting") and remains
+unbuilt, not abandoned — a future request, not a gap in this account.

@@ -22,6 +22,8 @@ function toView(project: Project): ProjectView {
     name: project.name,
     description: project.description,
     location: project.location,
+    siteLatitude: project.siteLatitude,
+    siteLongitude: project.siteLongitude,
     status: project.status,
     startDate: project.startDate.toISOString(),
     plannedEndDate: project.plannedEndDate.toISOString(),
@@ -61,6 +63,14 @@ export class ProjectsService {
         'Contract must be ACTIVE before a project can be raised against it',
       );
     }
+    if (
+      (dto.siteLatitude === undefined) !==
+      (dto.siteLongitude === undefined)
+    ) {
+      throw new BadRequestException(
+        'siteLatitude and siteLongitude must be supplied together',
+      );
+    }
 
     let project: Project;
     try {
@@ -71,6 +81,8 @@ export class ProjectsService {
           name: dto.name,
           description: dto.description,
           location: dto.location,
+          siteLatitude: dto.siteLatitude,
+          siteLongitude: dto.siteLongitude,
           startDate: new Date(dto.startDate),
           plannedEndDate: new Date(dto.plannedEndDate),
           createdById: actor.sub,

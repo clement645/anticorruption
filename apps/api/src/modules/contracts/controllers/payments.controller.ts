@@ -16,6 +16,7 @@ import { PaymentsService } from '../services/payments.service';
 import { PaymentApprovalDto } from '../dto/payment-approval.dto';
 import { RecordReconciliationDto } from '../dto/record-reconciliation.dto';
 import { RequirePermissions } from '../../iam/decorators/permissions.decorator';
+import { RequireStepUp } from '../../iam/decorators/require-step-up.decorator';
 import { CurrentUser } from '../../iam/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../iam/types/jwt-payload.type';
 
@@ -53,6 +54,7 @@ export class PaymentRequestsController {
   @Post(':id/execute')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('payment:execute')
+  @RequireStepUp()
   execute(
     @Param('id') id: string,
     @Headers('idempotency-key') idempotencyKey: string | undefined,

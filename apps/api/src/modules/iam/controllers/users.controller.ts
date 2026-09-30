@@ -20,6 +20,7 @@ import { EnableTotpDto } from '../dto/enable-totp.dto';
 import { UploadSigningKeyDto } from '../dto/upload-signing-key.dto';
 import { CurrentUser } from '../decorators/current-user.decorator';
 import { RequirePermissions } from '../decorators/permissions.decorator';
+import { RequireStepUp } from '../decorators/require-step-up.decorator';
 import type { AuthenticatedUser } from '../types/jwt-payload.type';
 import { AuditService } from '../../audit/audit.service';
 
@@ -87,6 +88,7 @@ export class UsersController {
 
   @Patch(':id')
   @RequirePermissions('users:update')
+  @RequireStepUp()
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateUserDto,

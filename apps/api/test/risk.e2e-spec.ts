@@ -32,6 +32,12 @@ interface RiskProfileBody {
   riskLevel: string;
   score: string;
 }
+interface AuditEventBody {
+  eventType: string;
+  resourceType: string | null;
+  resourceId: string | null;
+  payload: unknown;
+}
 
 /**
  * Exercises Phase 8 (AI Risk Engine): permission gating (including that
@@ -165,6 +171,7 @@ describe('AI Risk Engine (e2e)', () => {
       ['risk', 'read'],
       ['risk', 'review'],
       ['risk', 'manage'],
+      ['audit', 'read'],
     ]);
 
     // Mirrors the real Procurement Officer grant in seed.ts: read + manage
@@ -463,7 +470,55 @@ describe('AI Risk Engine (e2e)', () => {
 
     expect(flaggedForThisLot).toHaveLength(1);
     expect(flaggedForThisLot[0].severity).toBe('HIGH');
+
+    // Push notifications (post-launch, item 7): a HIGH alert dispatches a
+    // notification — LogOnlyNotificationAdapter never actually delivers
+    // anything, but the attempt is durably recorded on the audit trail, one
+    // event per dispatch (not one per recipient/channel).
+    const notifications = await request(app.getHttpServer())
+      .get('/api/v1/audit/events')
+      .query({
+        eventType: 'NOTIFICATION_DISPATCHED',
+        resourceType: 'RiskAlert',
+      })
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
+    const forThisAlert = (
+      notifications.body as { items: AuditEventBody[] }
+    ).items.filter((e) => e.resourceId === flaggedForThisLot[0].id);
+    expect(forThisAlert).toHaveLength(1);
+    const payload = forThisAlert[0].payload as {
+      delivered: boolean;
+      recipientCount: number;
+      channels: string[];
+    };
+    expect(payload.delivered).toBe(false);
+    // apps/api/.env configures one placeholder recipient per channel for
+    // this dev/test environment — see .env.example for why production
+    // defaults to none configured at all.
+    expect(payload.recipientCount).toBe(3);
+    expect(payload.channels.sort()).toEqual(['SMS', 'TELEGRAM', 'WHATSAPP']);
   });
+
+  it(
+    'live market-data pricing (item 7): a market-price-deviation check runs on every ' +
+      'tender close but never raises an alert while LogOnlyMarketDataAdapter has no ' +
+      'real provider configured — the check is wired and safe, not a false-positive risk',
+    async () => {
+      const { lotId } = await createTenderWithBids([990_000, 990_100, 990_200]);
+
+      const alerts = await request(app.getHttpServer())
+        .get('/api/v1/risk-alerts')
+        .query({
+          detectorType: 'MARKET_PRICE_DEVIATION',
+          resourceType: 'TenderLot',
+          resourceId: lotId,
+        })
+        .set('Authorization', `Bearer ${fullToken}`)
+        .expect(200);
+      expect(alerts.body as AlertBody[]).toHaveLength(0);
+    },
+  );
 
   it(
     'regression: 3 ordinary, evenly-spaced bids do not falsely trigger price ' +

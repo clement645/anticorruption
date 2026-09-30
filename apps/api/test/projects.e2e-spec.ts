@@ -30,6 +30,8 @@ interface ProjectBody {
   status: string;
   organizationId: string;
   actualEndDate: string | null;
+  siteLatitude: number | null;
+  siteLongitude: number | null;
 }
 interface MilestoneBody {
   id: string;
@@ -41,6 +43,17 @@ interface EvidenceBody {
   fileHash: string;
   fileSizeBytes: number;
   blockchainTxRef: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  gpsAccuracyMeters: number | null;
+  capturedAt: string | null;
+}
+interface RiskAlertBody {
+  id: string;
+  detectorType: string;
+  severity: string;
+  resourceType: string;
+  resourceId: string;
 }
 interface EvidenceDownloadBody {
   fileName: string;
@@ -165,6 +178,7 @@ describe('Project Verification (e2e)', () => {
       ['project', 'manage'],
       ['project', 'inspect'],
       ['evidence', 'upload'],
+      ['risk', 'read'],
     ]);
 
     pmRoleId = await grantRole('[E2E] Projects Manager', [
@@ -439,7 +453,10 @@ describe('Project Verification (e2e)', () => {
    * allows adding milestones to a PLANNED project (the milestone list is
    * frozen at activation — see the comment on that guard).
    */
-  async function createPlannedProject(): Promise<{
+  async function createPlannedProject(siteCoords?: {
+    siteLatitude: number;
+    siteLongitude: number;
+  }): Promise<{
     projectId: string;
     contractId: string;
     organizationId: string;
@@ -453,6 +470,7 @@ describe('Project Verification (e2e)', () => {
         name: 'E2E Rural Road Rehabilitation',
         description: '20km gravel road upgrade',
         location: 'Kericho County',
+        ...siteCoords,
         startDate: '2026-09-01',
         plannedEndDate: '2027-03-01',
       })
@@ -821,6 +839,111 @@ describe('Project Verification (e2e)', () => {
         mimeType: 'text/plain',
         fileContentBase64: Buffer.from('x').toString('base64'),
         inspectionId: otherInspectionId,
+      })
+      .expect(400);
+  });
+
+  it('stores GPS-tagged evidence and raises no alert when captured at the declared site', async () => {
+    // Kericho town, Kenya — plausible coordinates for the fixture's own
+    // "Kericho County" location string.
+    const { projectId } = await createPlannedProject({
+      siteLatitude: -0.3676,
+      siteLongitude: 35.2861,
+    });
+
+    const upload = await request(app.getHttpServer())
+      .post(`/api/v1/projects/${projectId}/evidence`)
+      .set('Authorization', `Bearer ${engToken}`)
+      .send({
+        fileName: 'onsite-photo.jpg',
+        mimeType: 'image/jpeg',
+        fileContentBase64: Buffer.from('[E2E] onsite photo bytes').toString(
+          'base64',
+        ),
+        latitude: -0.368,
+        longitude: 35.2865,
+        gpsAccuracyMeters: 12.5,
+        capturedAt: '2026-09-15T09:30:00.000Z',
+      })
+      .expect(201);
+    const evidence = upload.body as EvidenceBody;
+    expect(evidence.latitude).toBeCloseTo(-0.368);
+    expect(evidence.longitude).toBeCloseTo(35.2865);
+    expect(evidence.gpsAccuracyMeters).toBeCloseTo(12.5);
+    expect(evidence.capturedAt).toBe('2026-09-15T09:30:00.000Z');
+
+    const alerts = await request(app.getHttpServer())
+      .get('/api/v1/risk-alerts')
+      .query({ resourceType: 'ProjectEvidence', resourceId: evidence.id })
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
+    expect((alerts.body as RiskAlertBody[]).length).toBe(0);
+  });
+
+  it('raises an EVIDENCE_LOCATION_MISMATCH alert (never blocking the upload) when evidence GPS is far from the declared site', async () => {
+    // Site declared in Kericho; evidence "captured" in Nairobi — roughly
+    // 180km away, comfortably past the default 500m margin and its 10x
+    // HIGH-severity escalation.
+    const { projectId } = await createPlannedProject({
+      siteLatitude: -0.3676,
+      siteLongitude: 35.2861,
+    });
+
+    const upload = await request(app.getHttpServer())
+      .post(`/api/v1/projects/${projectId}/evidence`)
+      .set('Authorization', `Bearer ${engToken}`)
+      .send({
+        fileName: 'suspicious-photo.jpg',
+        mimeType: 'image/jpeg',
+        fileContentBase64: Buffer.from(
+          '[E2E] photo bytes from somewhere else entirely',
+        ).toString('base64'),
+        latitude: -1.2921,
+        longitude: 36.8219,
+      })
+      .expect(201); // never blocked — a risk alert, not a rejection
+
+    const evidence = upload.body as EvidenceBody;
+
+    const alerts = await request(app.getHttpServer())
+      .get('/api/v1/risk-alerts')
+      .query({ resourceType: 'ProjectEvidence', resourceId: evidence.id })
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
+    const alertList = alerts.body as RiskAlertBody[];
+    expect(alertList).toHaveLength(1);
+    expect(alertList[0].detectorType).toBe('EVIDENCE_LOCATION_MISMATCH');
+    expect(alertList[0].severity).toBe('HIGH');
+  });
+
+  it('rejects evidence upload with latitude but no longitude (and vice versa)', async () => {
+    const { projectId } = await createPlannedProject();
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/projects/${projectId}/evidence`)
+      .set('Authorization', `Bearer ${engToken}`)
+      .send({
+        fileName: 'x.txt',
+        mimeType: 'text/plain',
+        fileContentBase64: Buffer.from('x').toString('base64'),
+        latitude: -0.368,
+      })
+      .expect(400);
+  });
+
+  it('rejects creating a project with siteLatitude but no siteLongitude', async () => {
+    const contractId = await createActiveContract();
+
+    await request(app.getHttpServer())
+      .post('/api/v1/projects')
+      .set('Authorization', `Bearer ${pmToken}`)
+      .send({
+        contractId,
+        name: 'E2E Bad Coords Project',
+        description: 'should be rejected',
+        siteLatitude: -0.3676,
+        startDate: '2026-09-01',
+        plannedEndDate: '2027-03-01',
       })
       .expect(400);
   });

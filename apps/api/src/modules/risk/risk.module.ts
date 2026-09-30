@@ -6,6 +6,7 @@ import { BidCollusionDetector } from './services/bid-collusion.detector';
 import { SplitProcurementDetector } from './services/split-procurement.detector';
 import { SupplierRiskDetector } from './services/supplier-risk.detector';
 import { DuplicatePaymentDetector } from './services/duplicate-payment.detector';
+import { EvidenceLocationDetector } from './services/evidence-location.detector';
 import { RiskScansService } from './services/risk-scans.service';
 import { RiskAlertsController } from './controllers/risk-alerts.controller';
 import { RiskScansController } from './controllers/risk-scans.controller';
@@ -29,6 +30,7 @@ import { RiskScansController } from './controllers/risk-scans.controller';
     SplitProcurementDetector,
     SupplierRiskDetector,
     DuplicatePaymentDetector,
+    EvidenceLocationDetector,
     RiskScansService,
   ],
   exports: [
@@ -37,6 +39,7 @@ import { RiskScansController } from './controllers/risk-scans.controller';
     SplitProcurementDetector,
     SupplierRiskDetector,
     DuplicatePaymentDetector,
+    EvidenceLocationDetector,
   ],
 })
 export class RiskModule {}

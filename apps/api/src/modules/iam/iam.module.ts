@@ -12,6 +12,7 @@ import { RolesService } from './services/roles.service';
 import { OrganizationsService } from './services/organizations.service';
 import { SecurityEventsService } from './services/security-events.service';
 import { IdentityService } from './services/identity.service';
+import { StepUpService } from './services/step-up.service';
 import { AuthController } from './controllers/auth.controller';
 import { UsersController } from './controllers/users.controller';
 import { RolesController } from './controllers/roles.controller';
@@ -20,6 +21,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
 import { SignatureGuard } from './guards/signature.guard';
+import { StepUpGuard } from './guards/step-up.guard';
 import { AuditModule } from '../audit/audit.module';
 
 @Module({
@@ -48,15 +50,17 @@ import { AuditModule } from '../audit/audit.module';
     OrganizationsService,
     SecurityEventsService,
     IdentityService,
+    StepUpService,
     JwtStrategy,
     // Registered globally so every route requires authentication (Zero
     // Trust) and declared permissions are enforced, without every module
-    // having to remember to attach the guards itself. SignatureGuard is a
-    // no-op unless a route is decorated with @RequireSignature(), same
-    // pattern as PermissionsGuard.
+    // having to remember to attach the guards itself. SignatureGuard and
+    // StepUpGuard are both no-ops unless a route is decorated with
+    // @RequireSignature()/@RequireStepUp(), same pattern as PermissionsGuard.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_GUARD, useClass: SignatureGuard },
+    { provide: APP_GUARD, useClass: StepUpGuard },
   ],
   exports: [UsersService, SecurityEventsService, IdentityService],
 })

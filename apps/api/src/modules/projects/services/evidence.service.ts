@@ -14,6 +14,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { BLOCKCHAIN_ADAPTER } from '../../blockchain/blockchain.constants';
 import { OBJECT_STORAGE_ADAPTER } from '../../storage/storage.constants';
+import { EvidenceLocationDetector } from '../../risk/services/evidence-location.detector';
 import type { UploadEvidenceDto } from '../dto/upload-evidence.dto';
 import type {
   ProjectEvidenceDownload,
@@ -33,6 +34,10 @@ function toView(e: ProjectEvidence): ProjectEvidenceView {
     fileSizeBytes: e.fileSizeBytes,
     mimeType: e.mimeType,
     blockchainTxRef: e.blockchainTxRef,
+    latitude: e.latitude,
+    longitude: e.longitude,
+    gpsAccuracyMeters: e.gpsAccuracyMeters,
+    capturedAt: e.capturedAt ? e.capturedAt.toISOString() : null,
     uploadedById: e.uploadedById,
     createdAt: e.createdAt.toISOString(),
   };
@@ -53,6 +58,7 @@ export class EvidenceService {
     @Inject(OBJECT_STORAGE_ADAPTER)
     private readonly storage: ObjectStorageAdapter,
     @Inject(BLOCKCHAIN_ADAPTER) private readonly blockchain: BlockchainAdapter,
+    private readonly evidenceLocationDetector: EvidenceLocationDetector,
   ) {}
 
   async upload(
@@ -78,6 +84,12 @@ export class EvidenceService {
           'inspectionId must reference an inspection belonging to this project',
         );
       }
+    }
+
+    if ((dto.latitude === undefined) !== (dto.longitude === undefined)) {
+      throw new BadRequestException(
+        'latitude and longitude must be supplied together',
+      );
     }
 
     let content: Buffer;
@@ -130,6 +142,10 @@ export class EvidenceService {
         mimeType: dto.mimeType,
         storageKey,
         blockchainTxRef,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+        gpsAccuracyMeters: dto.gpsAccuracyMeters,
+        capturedAt: dto.capturedAt ? new Date(dto.capturedAt) : undefined,
         uploadedById: actor.sub,
       },
     });
@@ -148,10 +164,17 @@ export class EvidenceService {
         fileName: dto.fileName,
         fileHash,
         blockchainTxRef,
+        latitude: dto.latitude ?? null,
+        longitude: dto.longitude ?? null,
       },
       ipAddress: requestMeta.ipAddress,
       userAgent: requestMeta.userAgent,
     });
+
+    // Non-blocking, same "detector can only ever raise an alert, never the
+    // action that triggered it" invariant every other detector follows —
+    // see EvidenceLocationDetector's own doc comment.
+    await this.evidenceLocationDetector.evaluateEvidence(evidence.id);
 
     return toView(evidence);
   }

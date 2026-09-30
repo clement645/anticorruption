@@ -2,10 +2,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import * as argon2 from 'argon2';
+import { authenticator } from 'otplib';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { enrollTotp, issueStepUpToken } from './helpers/step-up';
 
 interface LoginResponseBody {
   accessToken: string;
@@ -367,12 +369,52 @@ describe('IAM (e2e)', () => {
   });
 
   describe('admin user management (users:create / users:update)', () => {
-    async function loginAsAdmin() {
+    // PATCH /users/:id is @RequireStepUp() (post-launch) — loginAsAdmin()
+    // enrolls TOTP once (cached in adminTotpSecret) and hands back a fresh
+    // step-up token on every call, since a step-up token issued against an
+    // earlier access token would still verify (it's keyed on user id, not
+    // token identity) but a new one costs nothing to generate here.
+    let adminTotpSecret: string | undefined;
+    async function loginAsAdmin(): Promise<{
+      token: string;
+      stepUpToken: string;
+    }> {
       const login = await request(app.getHttpServer())
         .post('/api/v1/auth/login')
         .send({ email: testEmailAdmin, password })
         .expect(200);
-      return (login.body as LoginResponseBody).accessToken;
+      const body = login.body as {
+        accessToken?: string;
+        mfaRequired?: boolean;
+        mfaToken?: string;
+      };
+
+      let token: string;
+      if (body.mfaRequired) {
+        // Once enrolled below, every SUBSEQUENT plain login for this admin
+        // requires the second MFA-verify step, same as any other
+        // MFA-enrolled account since Phase 2.
+        const verify = await request(app.getHttpServer())
+          .post('/api/v1/auth/mfa/verify')
+          .send({
+            mfaToken: body.mfaToken,
+            code: authenticator.generate(adminTotpSecret as string),
+          })
+          .expect(200);
+        token = (verify.body as LoginResponseBody).accessToken;
+      } else {
+        token = body.accessToken as string;
+      }
+
+      if (!adminTotpSecret) {
+        adminTotpSecret = await enrollTotp(app.getHttpServer(), token);
+      }
+      const stepUpToken = await issueStepUpToken(
+        app.getHttpServer(),
+        token,
+        adminTotpSecret,
+      );
+      return { token, stepUpToken };
     }
 
     it('rejects user creation from an actor without users:create', async () => {
@@ -396,7 +438,7 @@ describe('IAM (e2e)', () => {
     });
 
     it('allows an admin to create a user with an assigned role', async () => {
-      const token = await loginAsAdmin();
+      const { token } = await loginAsAdmin();
 
       const response = await request(app.getHttpServer())
         .post('/api/v1/users')
@@ -426,7 +468,7 @@ describe('IAM (e2e)', () => {
     });
 
     it('rejects a duplicate email with 409', async () => {
-      const token = await loginAsAdmin();
+      const { token } = await loginAsAdmin();
 
       await request(app.getHttpServer())
         .post('/api/v1/users')
@@ -456,12 +498,13 @@ describe('IAM (e2e)', () => {
     });
 
     it("allows an admin to replace a user's roles entirely", async () => {
-      const token = await loginAsAdmin();
+      const { token, stepUpToken } = await loginAsAdmin();
       const targetId = createdUserIds[0];
 
       const response = await request(app.getHttpServer())
         .patch(`/api/v1/users/${targetId}`)
         .set('Authorization', `Bearer ${token}`)
+        .set('X-Step-Up-Token', stepUpToken)
         .send({ roleIds: [targetRoleBId] })
         .expect(200);
 
@@ -470,34 +513,48 @@ describe('IAM (e2e)', () => {
     });
 
     it('allows an admin to suspend another user', async () => {
-      const token = await loginAsAdmin();
+      const { token, stepUpToken } = await loginAsAdmin();
       const targetId = createdUserIds[0];
 
       const response = await request(app.getHttpServer())
         .patch(`/api/v1/users/${targetId}`)
         .set('Authorization', `Bearer ${token}`)
+        .set('X-Step-Up-Token', stepUpToken)
         .send({ status: 'SUSPENDED' })
         .expect(200);
 
       expect((response.body as { status: string }).status).toEqual('SUSPENDED');
     });
 
+    it('rejects an update with a missing/invalid step-up token, even with users:update', async () => {
+      const { token } = await loginAsAdmin();
+      const targetId = createdUserIds[0];
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/users/${targetId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ status: 'ACTIVE' })
+        .expect(403);
+    });
+
     it('blocks an admin from changing their own account status', async () => {
-      const token = await loginAsAdmin();
+      const { token, stepUpToken } = await loginAsAdmin();
 
       await request(app.getHttpServer())
         .patch(`/api/v1/users/${adminUserId}`)
         .set('Authorization', `Bearer ${token}`)
+        .set('X-Step-Up-Token', stepUpToken)
         .send({ status: 'SUSPENDED' })
         .expect(403);
     });
 
     it('returns 404 when updating a non-existent user', async () => {
-      const token = await loginAsAdmin();
+      const { token, stepUpToken } = await loginAsAdmin();
 
       await request(app.getHttpServer())
         .patch('/api/v1/users/00000000-0000-4000-8000-000000000000')
         .set('Authorization', `Bearer ${token}`)
+        .set('X-Step-Up-Token', stepUpToken)
         .send({ status: 'SUSPENDED' })
         .expect(404);
     });

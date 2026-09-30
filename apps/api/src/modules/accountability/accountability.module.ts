@@ -1,0 +1,9 @@
+import { Module } from '@nestjs/common';
+import { AccountabilityController } from './accountability.controller';
+import { AccountabilityService } from './accountability.service';
+
+@Module({
+  controllers: [AccountabilityController],
+  providers: [AccountabilityService],
+})
+export class AccountabilityModule {}

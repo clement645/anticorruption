@@ -94,6 +94,15 @@ Presenting an already-rotated or revoked refresh token revokes the entire sessio
 ### `POST /api/v1/auth/logout`
 Revokes the current session's refresh token and clears the cookie. `204 No Content`.
 
+### `POST /api/v1/auth/step-up` (post-launch, item 5)
+Requires an already-valid access token (NOT `@Public()`). Body: `{ code }` — a
+**fresh** 6-digit TOTP code or backup code. Returns `{ stepUpToken, expiresIn }`
+(`expiresIn` seconds, `STEP_UP_TOKEN_TTL_SECONDS`, default 600). `403` if the account
+has no MFA enrolled, or if `code` is invalid. Present the returned token via the
+`X-Step-Up-Token` header on any route decorated `@RequireStepUp()` — currently
+`POST /payment-requests/:id/execute` and `PATCH /users/:id` (below). See SECURITY.md §
+Step-Up MFA for why this exists alongside (not instead of) login-time MFA.
+
 ### `GET /api/v1/users/me`
 Returns the authenticated user's id, email, roles, and flattened permission list (the
 same shape embedded in the access token).
@@ -106,13 +115,16 @@ Admin-created user with an administrator-set temporary password (no invite-email
 yet — see IMPLEMENTATION_PLAN.md Phase 2 follow-ups). Body includes `roleIds` (at
 least one) and optional `organizationId`/`departmentId`.
 
-### `PATCH /api/v1/users/:id` — requires `users:update`
+### `PATCH /api/v1/users/:id` — requires `users:update` AND a step-up token
 Admin user-management endpoint added alongside the User Management frontend view
 (post-Phase-14 work). Body: any of `roleIds` (fully replaces the user's role set —
 not diffed), `status` (`ACTIVE`/`SUSPENDED`/`LOCKED`/`PENDING_ACTIVATION`),
 `organizationId`, `departmentId`. An actor cannot change their own `status` (403) —
 prevents an admin from locking themselves out. 404 if the target user doesn't exist.
-Emits a `USER_UPDATED` security event and audit entry.
+Emits a `USER_UPDATED` security event and audit entry. **Post-launch (item 5):**
+requires a fresh `X-Step-Up-Token` header (see `POST /auth/step-up` above) — changing
+another user's role/status is a privilege-escalation vector, so a hijacked access
+token alone is not enough.
 
 ### `GET /api/v1/users/me/signing-key`
 Returns `{ enrolled: false }` or `{ enrolled: true, keyId, algorithm, createdAt }` for
@@ -149,6 +161,11 @@ both have it).
 ### `GET /api/v1/audit/events`
 Query: `?skip=&take=&eventType=&actorId=&resourceType=&resourceId=` (the last two
 added in Phase 11) — paginated, filterable audit event list, newest first.
+`eventType=NOTIFICATION_DISPATCHED` (post-launch, item 7) surfaces every push-
+notification attempt — see SECURITY.md § Push Notifications & Live Market-Data
+Pricing; payload carries `{ subject, recipientCount, channels, delivered }`, never
+the notification body itself (which mirrors whatever minimal fields the triggering
+event's own audit entry already carries).
 
 ### `GET /api/v1/audit/events/:id`
 A single audit event by id.
@@ -451,7 +468,13 @@ ever additively create a `RiskAlert` row. All routes require `risk:read` at mini
 Query: `?status=&severity=&detectorType=&resourceType=&resourceId=`. `status` is one
 of `OPEN`/`UNDER_REVIEW`/`CONFIRMED`/`DISMISSED`; `severity` one of
 `LOW`/`MEDIUM`/`HIGH`/`CRITICAL`; `detectorType` one of `PRICE_ANOMALY`/
-`BID_COLLUSION`/`SPLIT_PROCUREMENT`/`SUPPLIER_RISK`.
+`BID_COLLUSION`/`SPLIT_PROCUREMENT`/`SUPPLIER_RISK`/`DUPLICATE_PAYMENT`/
+`EVIDENCE_LOCATION_MISMATCH`/`MARKET_PRICE_DEVIATION`. The last one (post-launch,
+item 7) compares a tender lot's own estimate against an independent live market
+reference price via `MarketDataAdapter` — runs on every tender close, but never
+raises an alert in this deployment since the default `LogOnlyMarketDataAdapter`
+always returns no data. See SECURITY.md § Push Notifications & Live Market-Data
+Pricing.
 
 ### `GET /api/v1/risk-alerts/:id`
 
@@ -525,13 +548,16 @@ recorded a decision on this request. Any `REJECT` rejects immediately; the reque
 moves to `APPROVED` once `requiredApprovals` distinct `APPROVE` decisions exist.
 `400` once the request is no longer `PENDING`.
 
-### `POST /api/v1/payment-requests/:id/execute` (`payment:execute`)
+### `POST /api/v1/payment-requests/:id/execute` (`payment:execute` AND a step-up token)
 Requires an `Idempotency-Key` header — `400` if missing. `400` unless the request is
 `APPROVED`. Creates the real budget `Expenditure` (via Phase 5's
 `AllocationsService.createExpenditure()`), marks the invoice `PAID`, and the request
 `EXECUTED`. A retried request with the **same** key returns the original `Payment`
 unchanged, never disbursing twice; the same key against a **different**, already-
-executed request is a genuine `409` conflict.
+executed request is a genuine `409` conflict. **Post-launch (item 5):** requires a
+fresh `X-Step-Up-Token` header (see `POST /auth/step-up` above) — disbursing real
+money is the single most consequential action in the system, so a hijacked access
+token alone must not be enough to trigger it.
 
 ### `GET /api/v1/payments` · `GET /api/v1/payments/:id` (`payment:read`)
 
@@ -548,8 +574,11 @@ is `PLANNED`; `activate()` freezes the milestone list (see DATABASE.md § 5 for 
 ### `GET /api/v1/projects` · `GET /api/v1/projects/:id` (`project:read`)
 
 ### `POST /api/v1/projects` (`project:manage`)
-Body: `{ contractId, name, description, location?, startDate, plannedEndDate }`.
+Body: `{ contractId, name, description, location?, siteLatitude?, siteLongitude?, startDate, plannedEndDate }`.
 `400` if the contract is not `ACTIVE`. `409` if the contract already has a project.
+`siteLatitude`/`siteLongitude` (post-launch, item 6) must be supplied together or not
+at all — `400` otherwise. Manually supplied, never geocoded from `location`; enables
+`EvidenceLocationDetector` (see `POST /projects/:id/evidence` below) if set.
 
 ### `POST /api/v1/projects/:id/activate` · `/:id/suspend` · `/:id/resume` · `/:id/cancel` (`project:manage`)
 `PLANNED → IN_PROGRESS → {SUSPENDED ⇄ IN_PROGRESS} → COMPLETED`, or any non-terminal
@@ -584,12 +613,21 @@ complete (separation of duties, section 18).
 ### `GET /api/v1/projects/:id/evidence` (`project:read`)
 
 ### `POST /api/v1/projects/:id/evidence` (`evidence:upload`)
-Body: `{ fileName, mimeType, fileContentBase64, inspectionId? }`. `400` if
-`inspectionId` is given but doesn't belong to this project. Computes a SHA-256 hash
-server-side, encrypts and stores the bytes (AES-256-GCM, real filesystem storage —
-see ARCHITECTURE.md § 7), and anchors the hash on the blockchain immediately (not
-via the periodic audit rollup). A failed anchor attempt never blocks the upload —
-`blockchainTxRef` simply stays `null` for that record.
+Body: `{ fileName, mimeType, fileContentBase64, inspectionId?, latitude?, longitude?, gpsAccuracyMeters?, capturedAt? }`.
+`400` if `inspectionId` is given but doesn't belong to this project. Computes a
+SHA-256 hash server-side, encrypts and stores the bytes (AES-256-GCM, real
+filesystem storage — see ARCHITECTURE.md § 7), and anchors the hash on the
+blockchain immediately (not via the periodic audit rollup). A failed anchor
+attempt never blocks the upload — `blockchainTxRef` simply stays `null` for that
+record. **GPS-tagged evidence capture (post-launch, item 6):** `latitude`/
+`longitude` (client-supplied device GPS, must be supplied together or not at all —
+`400` otherwise), `gpsAccuracyMeters`, and `capturedAt` (the device's capture
+timestamp, ISO 8601) are all optional and preserved immutably. If both the
+evidence's coordinates and its project's `siteLatitude`/`siteLongitude` are
+present and disagree by more than `RISK_EVIDENCE_LOCATION_MISMATCH_METERS`
+(default 500m), an `EVIDENCE_LOCATION_MISMATCH` risk alert is raised — the
+upload itself is never blocked on this. See SECURITY.md § GPS-Tagged Evidence
+Capture.
 
 ### `GET /api/v1/evidence/:id` (`project:read`)
 
@@ -727,9 +765,51 @@ Public, unauthenticated — returns the full citable compliance-rule registry (s
 `apps/api/src/modules/compliance/compliance-rules.ts` and SECURITY.md § Legal & Policy
 Integration). Each entry: `{ id, title, citation, verifiedAgainst, description,
 enforcement, enforcedBy }`, where `enforcement` is one of `preventive` (can block an
-action — currently only the split-procurement gate), `detective` (flags for human
-review), or `design-principle` (a documented provision this system deliberately does
-not hard-code a specific number for — see the field's own `description` for why).
+action), `detective` (flags for human review), `design-principle` (a documented
+provision this system deliberately does not hard-code a specific number for — see the
+field's own `description` for why), or `transparency` (a live public-disclosure
+mechanism, not a check — currently only the accountability scorecards below).
+
+## Public Accountability Scorecards (post-launch)
+
+Named, per-official track records — a deliberate, user-confirmed exception to the
+Phase 12 Transparency Portal's "no individual identity, anywhere" rule. See
+SECURITY.md § Public Accountability Scorecards for the full policy-decision record.
+
+### `GET /api/v1/public/accountability/officials`
+Public, unauthenticated. Query: `skip?`, `take?` (default 25). Returns
+`{ items: PublicOfficialScorecard[], total }` for every user who has taken at least
+one qualifying action (see below) — users with zero qualifying actions are omitted
+from the list entirely, not shown with all-zero stats.
+
+### `GET /api/v1/public/accountability/officials/:id`
+Public, unauthenticated. `404` if no such user exists. Returns one
+`PublicOfficialScorecard`:
+```
+{
+  userId, firstName, lastName, organizationName, roles: string[],
+  totalActions,
+  budgetsApproved: { count, totalAmount },
+  procurementRequestsApproved: { count, totalAmount },
+  awardsMade: { count, totalAmount, distinctSuppliers, vendorDiversityRatio },
+  invoicesVerified: { count, totalAmount },
+  paymentsApproved: { count, totalAmount },
+  inspectionsConducted: { count, passed, failed, needsRevision },
+  riskFlaggedActionCount,
+  complianceRate  // 1 - (riskFlaggedActionCount / totalActions), or null if totalActions is 0
+}
+```
+Every field is computed live from real foreign-key relationships already written by
+other modules (`BudgetPlan.approvedById`, `ProcurementRequest.approvedById`,
+`Award.awardedById`, `Invoice.verifiedById`, `PaymentApproval.approvedById`,
+`Inspection.inspectedById`) — never a separate, cacheable, driftable figure.
+`riskFlaggedActionCount` cross-references `RiskAlert.resourceType`/`resourceId`
+against the official's own actioned resources (`ProcurementRequest`, `Invoice`, and
+via an award's underlying `Bid`/`TenderLot`) — it does NOT expose which specific alert
+or its contents, only the aggregate count. `vendorDiversityRatio` is `distinctSuppliers
+/ count` among the official's own awards (1.0 = every award went to a different
+supplier; closer to 0 = repeated awards to the same supplier, worth a second look) —
+`null` when the official has made no awards.
 
 ## OpenAPI / Swagger
 

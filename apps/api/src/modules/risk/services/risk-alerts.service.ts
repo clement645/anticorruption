@@ -6,6 +6,7 @@ import {
 import type { Prisma, RiskAlert, RiskDetectorType } from '@bpfmps/database';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 import type { ReviewAlertDto } from '../dto/review-alert.dto';
 import type { DetectionResult, RiskAlertView } from '../risk.types';
 
@@ -45,6 +46,7 @@ export class RiskAlertsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -97,6 +99,20 @@ export class RiskAlertsService {
         resourceId,
       },
     });
+
+    // Push notifications (post-launch, item 7): only the genuinely urgent
+    // tier — a LOW/MEDIUM alert queues for ordinary review, same as always,
+    // never interrupts anyone.
+    if (result.severity === 'HIGH' || result.severity === 'CRITICAL') {
+      await this.notificationsService.notifyRiskAlert({
+        id: alert.id,
+        detectorType,
+        severity: result.severity,
+        resourceType,
+        resourceId,
+        title: result.title,
+      });
+    }
 
     return toView(alert);
   }

@@ -15,6 +15,12 @@ interface SubmitReportResponse {
   trackingCode: string;
   reportId: string;
 }
+interface AuditEventBody {
+  eventType: string;
+  resourceType: string | null;
+  resourceId: string | null;
+  payload: unknown;
+}
 interface PublicStatusResponse {
   category: string;
   description: string;
@@ -101,6 +107,7 @@ describe('Whistleblower Portal (e2e)', () => {
     investigatorRoleId = await grantRole('[E2E] Whistleblower Investigator', [
       ['whistleblower', 'read'],
       ['whistleblower', 'investigate'],
+      ['audit', 'read'],
     ]);
 
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
@@ -193,6 +200,36 @@ describe('Whistleblower Portal (e2e)', () => {
       createHash('sha256').update(trackingCode, 'utf8').digest('hex'),
     );
   });
+
+  it(
+    'push notifications (item 7): submitting a report dispatches a notification whose ' +
+      'audit trail carries only reportId + category, never description/contact/organizationId',
+    async () => {
+      const { reportId } = await submitReport();
+
+      const notifications = await request(app.getHttpServer())
+        .get('/api/v1/audit/events')
+        .query({ eventType: 'NOTIFICATION_DISPATCHED', resourceType: 'Report' })
+        .set('Authorization', `Bearer ${investigatorToken}`)
+        .expect(200);
+      const forThisReport = (
+        notifications.body as { items: AuditEventBody[] }
+      ).items.filter((e) => e.resourceId === reportId);
+      expect(forThisReport).toHaveLength(1);
+
+      const payload = forThisReport[0].payload as {
+        subject: string;
+        delivered: boolean;
+        recipientCount: number;
+      };
+      expect(payload.delivered).toBe(false);
+      expect(payload.recipientCount).toBe(3);
+      // The notification content itself (subject) is built from category
+      // only — never the report's free-text description or contact.
+      expect(payload.subject).toContain('CORRUPTION');
+      expect(payload.subject).not.toContain('relative-owned');
+    },
+  );
 
   it('checks status by tracking code with no auth, and rejects an unknown code with a generic 404', async () => {
     const { trackingCode } = await submitReport(

@@ -1120,6 +1120,8 @@ enum RiskDetectorType {
   SPLIT_PROCUREMENT
   SUPPLIER_RISK
   DUPLICATE_PAYMENT
+  EVIDENCE_LOCATION_MISMATCH
+  MARKET_PRICE_DEVIATION
 }
 
 enum RiskAlertSeverity {
@@ -1470,6 +1472,13 @@ model Project {
   name           String
   description    String
   location       String?
+  // Optional known site coordinates (post-launch, GPS-tagged evidence
+  // capture) — set once, manually, at project creation. No geocoding: the
+  // person creating the project supplies real-world coordinates directly,
+  // never derived from `location` (free text). Enables EvidenceLocationDetector
+  // to flag evidence captured far from the declared site — see risk module.
+  siteLatitude   Float?
+  siteLongitude  Float?
   status         ProjectStatus @default(PLANNED)
   startDate      DateTime
   plannedEndDate DateTime
@@ -1577,6 +1586,25 @@ model ProjectEvidence {
   mimeType        String
   storageKey      String  @unique
   blockchainTxRef String?
+
+  // GPS-tagged evidence capture (post-launch): all optional — best-effort,
+  // client-supplied (a browser/mobile Geolocation API reading at capture
+  // time), never server-derived. Absent for evidence types with no
+  // meaningful location (e.g. a scanned procurement document uploaded from
+  // an office) — recording nothing is honest; the point is that when GPS IS
+  // present, it's preserved immutably alongside the file, never recomputed
+  // or overwritten later. `capturedAt` is the DEVICE's capture timestamp,
+  // deliberately distinct from `createdAt` (server insert time) — a large
+  // gap between them is itself a signal (stale/pre-staged evidence) that
+  // EvidenceLocationDetector does not currently check but a human reviewer
+  // can, since both timestamps are preserved. See EvidenceLocationDetector
+  // (risk module) for the one automated check built on top of this data:
+  // flagging evidence captured far from the project's declared
+  // `siteLatitude`/`siteLongitude`, never blocking upload.
+  latitude          Float?
+  longitude         Float?
+  gpsAccuracyMeters Float?
+  capturedAt        DateTime?
 
   uploadedById String?
   uploadedBy   User?   @relation(fields: [uploadedById], references: [id], onDelete: SetNull)

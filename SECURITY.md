@@ -32,9 +32,8 @@ trust.
   by design — see DEPLOYMENT.md).
 - Every authentication event (login success/failure/lockout, MFA challenge/verify/fail,
   token refresh/reuse-detected, logout) is written to `security_events`.
-- **Not yet implemented:** step-up authentication before high-value actions (no such
-  actions exist yet — introduced alongside the module that needs them, e.g. payment
-  approval in Phase 9), device trust tracking beyond the `devices` table existing,
+- Step-up MFA before high-value actions — see "Step-Up MFA (item 5, post-launch)" below.
+- **Not yet implemented:** device trust tracking beyond the `devices` table existing,
   login-anomaly detection (impossible travel / new device / unusual hour), forced
   password rotation on first login, and an API-key issuing flow (the `api_keys` table
   exists but has no endpoint yet).
@@ -190,6 +189,108 @@ structurally impossible before this work. Two real, distinct controls instead:
   if a different one — for independent human review. Pure detection, consistent with
   the risk engine's own stated invariant (see RiskAlertsService's doc comment): the
   engine itself has no code path that can block anything, only ever raises an alert.
+
+## Public Accountability Scorecards (item 4, post-launch)
+
+`GET /public/accountability/officials` and `/officials/:id` — named, per-official
+track records, computed live from real data (budgets approved, procurement requests
+approved, tender awards made, invoices verified, payments approved, inspections
+conducted, vendor-award diversity, and a risk-flagged-action rate). Every number
+derives from a real foreign-key relationship another module already writes
+(`BudgetPlan.approvedById`, `Award.awardedById`, etc.) — never a separate,
+self-reported, or cacheable-and-driftable figure.
+
+**This is a deliberate, explicit, user-confirmed exception to Phase 12's own rule.**
+The Citizen Transparency Portal (§ Public Transparency Surface above) states plainly
+that no individual actor's identity is EVER exposed on the public surface — "none of
+it, anywhere." An accountability scorecard, by its nature, requires the opposite:
+naming officials and publishing their track record. This is a genuine, irreversible
+policy tradeoff (transparency/accountability value vs. an individual public servant's
+privacy and personal-safety exposure), not an engineering judgment call, so it was put
+to the user directly rather than assumed either way:
+
+- **Option presented as default/recommended**: internal-only — named scorecards
+  visible to Auditor/Internal Auditor roles, preserving the existing public-privacy
+  boundary while still giving real oversight tooling to the people who actually
+  investigate corruption.
+- **Option presented as a middle ground**: public, organization/department-level
+  aggregates only (e.g. "92% clean rate" per ministry), with no names — named
+  individual detail stays internal-only.
+- **Option the user chose**: full public disclosure, with names — reversing the
+  Phase 12 boundary for this one surface specifically.
+
+This is defensible, not merely "the user said so": these are real government
+officials' OFFICIAL actions (approving public budgets, awarding public contracts) — the
+same category of public record the Transparency Portal already publishes for suppliers
+and tenders, just attributed to the specific official rather than left anonymous. It
+is not personal data about a private individual, and Article 227(1)'s transparency
+principle (cited throughout this document) supports disclosure of how public officials
+exercise public authority.
+
+**What stayed excluded even after choosing "public with names"** — the identity
+question and two separate questions were not reopened by the same decision:
+- Email/phone are still never published — the ask was names and track records, not
+  contact details, and there is no operational reason to expose them here.
+- The CONTENT of any specific risk alert is never published — only the aggregate
+  `riskFlaggedActionCount`/`complianceRate`. Publishing which specific action was
+  flagged, and why, would expose live-investigation detail (a genuine operational
+  security concern, e.g. tipping off a supplier or official under active review before
+  an Auditor has reached a conclusion) that is entirely separate from the identity
+  question already decided above.
+
+See the `public-accountability-scorecards` entry in the compliance registry
+(`GET /api/v1/compliance/rules`) for the same record in citable form, and
+IMPLEMENTATION_PLAN.md's post-launch item 4 entry for the full build account.
+
+## Step-Up MFA (item 5, post-launch)
+
+Login-time MFA (Phase 2, above) defends the moment a session begins. It does not
+defend a session already in progress: a hijacked or stolen access token can be replayed
+for its whole lifetime (default 15 minutes) without the attacker ever touching the
+victim's MFA device. Step-up MFA closes that specific gap for the small number of
+actions where it matters most — currently `POST /payment-requests/:id/execute`
+(moving real money) and `PATCH /users/:id` (changing another user's role or status,
+i.e. a privilege-escalation vector).
+
+- A route opts in with `@RequireStepUp()`, always alongside its ordinary
+  `@RequirePermissions()` check, never instead of it.
+- The caller obtains a step-up token via `POST /auth/step-up` — an already-authenticated
+  request (not `@Public()`) presenting a **fresh** TOTP or backup code. Reusing the code
+  that logged the session in originally does not work once its 30-second TOTP window has
+  passed, and a backup code is one-time-use by design (Phase 2) — so this is a genuine
+  fresh MFA challenge, not a replay of the original one.
+- The resulting token is short-lived (`STEP_UP_TOKEN_TTL_SECONDS`, default 10 minutes)
+  and is presented on protected requests via `X-Step-Up-Token`. `StepUpGuard` verifies
+  it is a well-formed, unexpired, correctly-signed token whose `sub` matches the
+  AUTHENTICATED caller of the current request — a genuinely valid step-up token issued
+  to a different user is rejected, even if that user also holds the required
+  permissions (verified via e2e test).
+- Deliberately a bounded "elevated session" token, not a per-request signature like the
+  digital-signature feature (Phase 3/item 1, above). The two solve different problems: a
+  signature proves WHO authorized one specific request, non-repudiably, forever. A
+  step-up token proves the holder had the MFA device recently, for a bounded window.
+  Requiring a fresh 6-digit code — which cannot be reused within its own 30-second
+  period anyway — on every single request in a batch of sensitive actions would be
+  unusable, not more secure.
+- Signed with `STEP_UP_TOKEN_SECRET`, a distinct secret from `JWT_SECRET` — the same
+  key-separation-per-purpose discipline as `MFA_ENCRYPTION_KEY` /
+  `EVIDENCE_ENCRYPTION_KEY` / `WHISTLEBLOWER_CONTACT_ENCRYPTION_KEY` elsewhere in this
+  document — so a step-up assertion can never be forged or replayed as an ordinary
+  access token, or vice versa, even if one secret were somehow compromised.
+- An account without MFA enrolled cannot obtain a step-up token at all
+  (`POST /auth/step-up` returns 403 with a pointer to
+  `POST /users/me/mfa/totp/setup`) and therefore cannot perform any `@RequireStepUp()`
+  action. This is a deliberate forcing function: any role holding a permission
+  sensitive enough to warrant step-up should have MFA enrolled regardless.
+- The risk engine's own invariant (see "Risk Detection" note in Legal & Policy
+  Integration Layer, above) is unaffected — `StepUpGuard` is orthogonal to
+  `RiskAlertsService`; it enforces a fixed access-control rule declared on the route,
+  never a data-derived risk score.
+- **Deliberately excluded from step-up in this pass, per explicit user direction:**
+  citizen voting (not yet built at all — a separate, not-yet-scheduled post-launch
+  item). Other sensitive actions (budget approval) already carry the stronger
+  per-official digital-signature requirement (item 1) instead, which subsumes step-up's
+  guarantee for that specific action.
 
 ## Immutable Audit (Phase 3 — implemented)
 
@@ -512,6 +613,128 @@ was actually done" — the same shape as Phase 6 (evaluate vs. award), Phase 8
 verify an invoice, approve vs. execute a payment). A milestone only reaches
 `VERIFIED` as the consequence of an Engineer's independent PASSED inspection —
 never self-declared by whoever completed the work.
+
+## GPS-Tagged Evidence Capture (item 6, post-launch)
+
+Extends the Phase 10 evidence vault above with optional GPS metadata,
+closing a real gap: nothing previously distinguished a genuine site photo
+from any other image file — an official could upload a stock photo, a
+recycled photo from a different project, or a photo taken nowhere near the
+claimed site, and it would be stored, hashed, and anchored exactly as
+credibly as a real one.
+
+- `POST /projects/:id/evidence` accepts optional `latitude`, `longitude`
+  (a browser/mobile Geolocation API reading, client-supplied — never
+  server-derived, never geocoded from anything), `gpsAccuracyMeters`, and
+  `capturedAt` (the DEVICE's capture timestamp, deliberately distinct from
+  the server's `createdAt` insert time). All four are optional and
+  preserved immutably once recorded — same "store what's given, never
+  silently recompute or overwrite" discipline as `fileHash`.
+- `POST /projects` accepts optional `siteLatitude`/`siteLongitude` — a
+  project's own declared site coordinates, set once, manually, at creation.
+  Deliberately NOT geocoded from the existing free-text `location` field:
+  no external geocoding API is called (consistent with this round's
+  "build as pluggable adapters, log-only for now" decision for
+  external-account-dependent features — geocoding would be another one),
+  so the person creating the project supplies real coordinates directly if
+  they want this check to run at all.
+- **The one automated check this enables**: `EvidenceLocationDetector`
+  (risk module) — when a piece of evidence has GPS coordinates AND its
+  project has declared site coordinates, and the two disagree by more than
+  `RISK_EVIDENCE_LOCATION_MISMATCH_METERS` (default 500m, haversine
+  distance), a risk alert is raised (MEDIUM, or HIGH beyond 10x that
+  margin). Same non-blocking invariant as every other detector in this
+  system (see RiskAlertsService's own doc comment) — evidence upload is
+  never rejected on the basis of a location mismatch, only flagged for a
+  human with `risk:review` to look at.
+- Most evidence will have neither field set (scanned documents, older
+  uploads, or an environment where GPS was unavailable/denied) — this is
+  not itself suspicious and is deliberately never flagged. The check only
+  fires on a genuine, present disagreement between two pieces of
+  data that were both actually supplied.
+- `latitude`/`longitude` (on evidence) and `siteLatitude`/`siteLongitude`
+  (on a project) must each be supplied together or not at all — enforced
+  server-side (400 if only one of a pair is present), not left to the
+  client.
+
+## Push Notifications & Live Market-Data Pricing (item 7, post-launch)
+
+The final two items in the post-launch feature sequence, deliberately built
+together: both need a real third-party account this project doesn't have
+(Twilio/Telegram bot token/WhatsApp Business API for one, a paid market-data
+provider for the other), so — per the user's own explicit sequencing
+decision made before any of items 1–7 were started — both are built as
+pluggable adapters behind an interface, with only a **log-only** default
+implementation wired in today. Business code depends only on the interface
+(`NotificationAdapter`, `MarketDataAdapter`) in both cases; a real provider
+is a one-line change to the `useClass` in `notifications.module.ts`/
+`market-data.module.ts`, no caller changes.
+
+**Push notifications** (`apps/api/src/modules/notifications/`):
+- `LogOnlyNotificationAdapter` never contacts any real SMS/Telegram/
+  WhatsApp provider — it logs what would have been sent and honestly
+  reports `delivered: false`. This will remain true regardless of how many
+  recipients are configured, until a real adapter replaces it.
+- Two purpose-built trigger points, not a generic "send anything" API —
+  each owns building its own message content, so the discipline of what's
+  safe to include lives next to the trigger that knows the answer:
+  - `RiskAlertsService.raiseAlert()` — only for **HIGH/CRITICAL** severity
+    (a LOW/MEDIUM alert queues for ordinary review, same as always, never
+    interrupts anyone).
+  - `WhistleblowerService.submitReport()` — deliberately carries the exact
+    same minimal fields already on the `WHISTLEBLOWER_REPORT_SUBMITTED`
+    audit event (`reportId` + `category` only, never description/contact/
+    organizationId). This is the one action in the entire codebase that
+    must never be attributable to anyone (see THREAT_MODEL.md Phase 13) —
+    a notification body is just as capable of leaking that as an audit
+    payload would be, so it gets the identical discipline, not a separate
+    judgment call.
+- Recipients are configured per channel via `NOTIFICATION_RECIPIENTS_SMS`/
+  `_TELEGRAM`/`_WHATSAPP` (comma-separated, empty by default) — WHO should
+  be notified is a genuine deployment/policy decision nothing in this
+  codebase can make on an operator's behalf, so production defaults to
+  nobody configured.
+- Every dispatch attempt (whether zero or many recipients are configured)
+  is recorded as one `NOTIFICATION_DISPATCHED` audit event — not one per
+  recipient/channel, which would bloat the trail for what is, today,
+  always a no-op. This durable trail is deliberate: once a real adapter is
+  plugged in, it becomes the actual delivery history, not just a debug log.
+
+**Live market-data pricing** (`apps/api/src/modules/market-data/`):
+- `LogOnlyMarketDataAdapter` never contacts any real pricing provider —
+  it always returns `null` ("no data available"), the honest answer when
+  nothing is configured, never a fabricated or estimated figure standing
+  in for real market data.
+- Closes a real, structural gap in Phase 8's `PriceAnomalyDetector`: its
+  existing peer-bid z-score can only catch a bid that stands out AMONG a
+  lot's own bidders — it cannot catch every bidder colluding to submit
+  similarly inflated prices, since there is no outlier relative to a
+  rigged peer set. `evaluateMarketPriceDeviation()` compares the lot's own
+  pre-tender ESTIMATE against an independent market reference price
+  instead, catching a different, orthogonal pattern (an inflated estimate
+  used to justify inflated bids, or a genuinely rigged sole-bidder award) —
+  runs on every tender close, independent of bid count.
+- `RISK_MARKET_PRICE_DEVIATION_THRESHOLD` (default 30%, a genuine policy
+  threshold — unlike the fixed statistical constants in `risk.constants.ts`
+  — deliberately generous, since region/quality/urgency legitimately move
+  real prices) gates a new `MARKET_PRICE_DEVIATION` detective alert
+  (MEDIUM, HIGH beyond 2x the threshold). Same non-blocking invariant as
+  every other detector — never blocks a tender's close.
+- **In this deployment, this check never fires** — `LogOnlyMarketDataAdapter`
+  always returns `null`, so the deviation comparison never runs to
+  completion. This is by design, not a bug: the wiring, the detector, the
+  alert type, and the audit trail all exist and are exercised end to end
+  (see `risk.e2e-spec.ts`'s dedicated test confirming zero false positives
+  from the always-empty adapter), ready for a real provider to activate
+  the actual check without any other code changing.
+
+Deliberately kept inside `apps/api` rather than promoted to their own
+`packages/notifications`/`packages/market-data` workspace packages, unlike
+`BlockchainAdapter`/`ObjectStorageAdapter`: neither interface is consumed
+outside `apps/api` (and neither is blockchain/storage's own split actually
+about cross-app sharing — `apps/web` imports neither), so a single small
+module already delivers the same swappable-adapter guarantee without the
+extra workspace-package overhead.
 
 ## Public Transparency Surface (Phase 12 — implemented)
 

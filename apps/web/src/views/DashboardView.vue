@@ -38,11 +38,20 @@ const quickLinks = computed(() =>
 
 <template>
   <section class="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-    <div class="page-header">
-      <h1 class="page-title">Welcome{{ auth.user ? `, ${auth.user.email}` : '' }}</h1>
-      <p class="page-subtitle">
-        {{ auth.user?.roles.join(', ') || 'No roles assigned' }}
-      </p>
+    <div class="page-header sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h1 class="page-title">Welcome{{ auth.user ? `, ${auth.user.email.split('@')[0]}` : '' }}</h1>
+        <p class="page-subtitle mt-1">Here's what needs your attention across the system.</p>
+      </div>
+      <div class="hidden flex-wrap justify-end gap-1.5 sm:flex">
+        <span
+          v-for="role in auth.user?.roles ?? []"
+          :key="role"
+          class="badge badge-info"
+        >
+          {{ role }}
+        </span>
+      </div>
     </div>
 
     <div v-if="quickLinks.length > 0" class="mt-6">
@@ -52,16 +61,16 @@ const quickLinks = computed(() =>
           v-for="link in quickLinks"
           :key="link.to"
           :to="link.to"
-          class="card group flex items-start gap-3 p-4 transition-shadow hover:shadow-md"
+          class="card group flex items-start gap-3 p-4 transition-all hover:-translate-y-0.5 hover:shadow-[0_4px_10px_rgba(23,41,66,0.06),0_16px_32px_-16px_rgba(23,41,66,0.18)]"
         >
-          <div class="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+          <div class="flex h-10 w-10 flex-none items-center justify-center rounded-md bg-brand-50 text-brand-700">
             <component :is="link.icon" class="h-5 w-5" />
           </div>
           <div class="flex-1">
             <p class="text-sm font-semibold text-slate-900">{{ link.label }}</p>
             <p class="mt-0.5 text-xs text-slate-500">{{ link.desc }}</p>
           </div>
-          <ArrowRight class="mt-2 h-4 w-4 flex-none text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-500" />
+          <ArrowRight class="mt-2 h-4 w-4 flex-none text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-600" />
         </router-link>
       </div>
     </div>
@@ -77,9 +86,9 @@ const quickLinks = computed(() =>
         <div v-if="health.loading" class="text-sm text-slate-500">Checking system status…</div>
 
         <div v-else-if="health.error" class="flex items-start gap-3">
-          <span class="mt-1 h-2.5 w-2.5 flex-none rounded-full bg-red-500" aria-hidden="true" />
+          <span class="mt-1 h-2.5 w-2.5 flex-none rounded-full bg-red-600" aria-hidden="true" />
           <div>
-            <p class="font-medium text-red-700">API unreachable</p>
+            <p class="font-medium text-red-800">API unreachable</p>
             <p class="mt-1 text-sm text-slate-600">{{ health.error }}</p>
           </div>
         </div>

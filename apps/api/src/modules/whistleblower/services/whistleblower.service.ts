@@ -20,6 +20,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { BLOCKCHAIN_ADAPTER } from '../../blockchain/blockchain.constants';
 import { OBJECT_STORAGE_ADAPTER } from '../../storage/storage.constants';
+import { NotificationsService } from '../../notifications/notifications.service';
 import type { EnvConfig } from '../../../config/env.validation';
 import type { SubmitReportDto } from '../dto/submit-report.dto';
 import type { AddEvidenceDto } from '../dto/add-evidence.dto';
@@ -82,6 +83,7 @@ export class WhistleblowerService {
     @Inject(OBJECT_STORAGE_ADAPTER)
     private readonly storage: ObjectStorageAdapter,
     @Inject(BLOCKCHAIN_ADAPTER) private readonly blockchain: BlockchainAdapter,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // ---------------------------------------------------------------------
@@ -127,6 +129,15 @@ export class WhistleblowerService {
         evidenceCount: dto.evidence?.length ?? 0,
       },
     });
+
+    // Push notifications (post-launch, item 7): same minimal-disclosure
+    // fields as the audit event above (reportId + category only) — see
+    // NotificationsService.notifyWhistleblowerReportSubmitted()'s own doc
+    // comment for why nothing more is ever safe to include here.
+    await this.notificationsService.notifyWhistleblowerReportSubmitted(
+      report.id,
+      dto.category,
+    );
 
     return { trackingCode, reportId: report.id };
   }

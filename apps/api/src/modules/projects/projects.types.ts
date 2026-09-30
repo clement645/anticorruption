@@ -5,6 +5,8 @@ export interface ProjectView {
   name: string;
   description: string;
   location: string | null;
+  siteLatitude: number | null;
+  siteLongitude: number | null;
   status: string;
   startDate: string;
   plannedEndDate: string;
@@ -43,6 +45,10 @@ export interface ProjectEvidenceView {
   fileSizeBytes: number;
   mimeType: string;
   blockchainTxRef: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  gpsAccuracyMeters: number | null;
+  capturedAt: string | null;
   uploadedById: string | null;
   createdAt: string;
 }

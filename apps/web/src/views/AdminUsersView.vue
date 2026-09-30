@@ -298,7 +298,7 @@ function toggleRole(list: string[], roleId: string) {
             </div>
           </div>
 
-          <p v-if="formError" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{{ formError }}</p>
+          <p v-if="formError" class="alert-error">{{ formError }}</p>
 
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" class="btn btn-secondary" @click="createOpen = false">Cancel</button>
@@ -358,7 +358,7 @@ function toggleRole(list: string[], roleId: string) {
             </div>
           </div>
 
-          <p v-if="formError" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{{ formError }}</p>
+          <p v-if="formError" class="alert-error">{{ formError }}</p>
 
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" class="btn btn-secondary" @click="editOpen = false">Cancel</button>

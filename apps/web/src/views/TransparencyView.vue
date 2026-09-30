@@ -44,32 +44,41 @@ function statusColor(status: string): string {
 </script>
 
 <template>
-  <section class="mx-auto max-w-5xl px-4 py-10">
-    <div class="page-header">
-      <h1 class="page-title">Citizen Transparency Portal</h1>
-      <p class="page-subtitle">
-        Public, no sign-in required. Search public projects, tenders, and suppliers, view where
-        public budgets are allocated, and independently verify the hash of any piece of published
-        evidence.
-      </p>
+  <div>
+    <div class="relative overflow-hidden bg-brand-900">
+      <div
+        class="pointer-events-none absolute inset-0 opacity-[0.06]"
+        style="background-image: radial-gradient(circle at 1px 1px, white 1px, transparent 0); background-size: 28px 28px"
+        aria-hidden="true"
+      />
+      <div class="relative mx-auto max-w-5xl px-4 py-12 sm:px-6">
+        <p class="text-[11px] font-medium uppercase tracking-wider text-accent-300">Public &middot; No sign-in required</p>
+        <h1 class="mt-2 font-serif text-3xl font-semibold text-white sm:text-4xl">Citizen Transparency Portal</h1>
+        <p class="mt-3 max-w-2xl text-sm leading-relaxed text-brand-200">
+          Search public projects, tenders, and suppliers, view where public budgets are allocated, and
+          independently verify the hash of any piece of published evidence — every figure here is drawn
+          live from the same system officials use.
+        </p>
+      </div>
     </div>
 
-    <nav class="mt-6 flex flex-wrap gap-1 border-b border-slate-200 text-sm">
-      <button
-        v-for="tab in (['projects', 'tenders', 'suppliers', 'budgets', 'verify'] as Tab[])"
-        :key="tab"
-        type="button"
-        class="rounded-t-lg px-3 py-2 capitalize"
-        :class="activeTab === tab ? 'border-b-2 border-brand-600 font-medium text-brand-700' : 'text-slate-500 hover:text-slate-800'"
-        @click="setTab(tab)"
-      >
-        {{ tab === 'verify' ? 'Verify a hash' : tab }}
-      </button>
-    </nav>
+    <section class="mx-auto max-w-5xl px-4 py-10 sm:px-6">
+      <nav class="flex flex-wrap gap-1 border-b border-slate-200 text-sm">
+        <button
+          v-for="tab in (['projects', 'tenders', 'suppliers', 'budgets', 'verify'] as Tab[])"
+          :key="tab"
+          type="button"
+          class="tab-pill"
+          :class="activeTab === tab ? 'tab-pill-active' : 'tab-pill-inactive'"
+          @click="setTab(tab)"
+        >
+          {{ tab === 'verify' ? 'Verify a hash' : tab }}
+        </button>
+      </nav>
 
-    <p v-if="store.error" class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-      {{ store.error }}
-    </p>
+      <p v-if="store.error" class="mt-4 alert-error">
+        {{ store.error }}
+      </p>
 
     <!-- Projects -->
     <div v-if="activeTab === 'projects'" class="mt-6">
@@ -260,5 +269,6 @@ function statusColor(status: string): string {
         </template>
       </div>
     </div>
-  </section>
+    </section>
+  </div>
 </template>

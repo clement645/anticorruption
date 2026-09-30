@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "RiskDetectorType" ADD VALUE 'MARKET_PRICE_DEVIATION';

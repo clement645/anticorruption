@@ -11,11 +11,15 @@ import { ConfigService } from '@nestjs/config';
 import { ApiTags } from '@nestjs/swagger';
 import type { CookieOptions, Request, Response } from 'express';
 import { AuthService } from '../services/auth.service';
+import { StepUpService } from '../services/step-up.service';
 import { LoginDto } from '../dto/login.dto';
 import { VerifyMfaDto } from '../dto/verify-mfa.dto';
+import { StepUpDto } from '../dto/step-up.dto';
 import { Public } from '../decorators/public.decorator';
+import { CurrentUser } from '../decorators/current-user.decorator';
 import type { EnvConfig } from '../../../config/env.validation';
 import type { IssuedTokens } from '../services/token.service';
+import type { AuthenticatedUser } from '../types/jwt-payload.type';
 
 const REFRESH_COOKIE_NAME = 'bpfmps_refresh_token';
 
@@ -24,6 +28,7 @@ const REFRESH_COOKIE_NAME = 'bpfmps_refresh_token';
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly stepUpService: StepUpService,
     private readonly config: ConfigService<EnvConfig, true>,
   ) {}
 
@@ -97,6 +102,19 @@ export class AuthController {
     ];
     await this.authService.logout(presented);
     this.clearRefreshCookie(res);
+  }
+
+  /**
+   * Step-up MFA (post-launch): requires an already-valid access token (not
+   * @Public()) plus a FRESH TOTP/backup code, and issues a short-lived
+   * assertion (`STEP_UP_TOKEN_TTL_SECONDS`, default 10 minutes) usable via
+   * the `X-Step-Up-Token` header on routes decorated with
+   * @RequireStepUp() — see StepUpGuard.
+   */
+  @Post('step-up')
+  @HttpCode(HttpStatus.OK)
+  async stepUp(@Body() dto: StepUpDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.stepUpService.verifyAndIssue(user.sub, dto.code);
   }
 
   private toLoginResponse(tokens: IssuedTokens) {
