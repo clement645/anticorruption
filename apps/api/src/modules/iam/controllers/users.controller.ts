@@ -95,7 +95,12 @@ export class UsersController {
     @CurrentUser() actor: AuthenticatedUser,
     @Req() req: Request,
   ) {
-    const updated = await this.usersService.update(id, dto, actor.sub);
+    const updated = await this.usersService.update(
+      id,
+      dto,
+      { sub: actor.sub, email: actor.email, organizationId: actor.organizationId },
+      { ipAddress: req.ip, userAgent: req.headers['user-agent'] },
+    );
 
     await this.securityEvents.record({
       type: 'USER_UPDATED',

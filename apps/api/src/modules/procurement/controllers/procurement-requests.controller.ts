@@ -74,7 +74,12 @@ export class ProcurementRequestsController {
     @CurrentUser() actor: AuthenticatedUser,
     @Req() req: Request,
   ) {
-    return this.requestsService.approve(id, actor, meta(req));
+    return this.requestsService.approve(
+      id,
+      actor,
+      meta(req),
+      (req as Request & { stepUpVerified?: boolean }).stepUpVerified === true,
+    );
   }
 
   @Post(':id/reject')

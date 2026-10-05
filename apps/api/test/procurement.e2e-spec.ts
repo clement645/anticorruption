@@ -47,16 +47,24 @@ describe('Procurement (e2e)', () => {
   let prisma: PrismaService;
 
   const adminEmail = 'e2e-proc-admin@test.bpfmps.local';
+  // Gap-audit fix (F-003): budget and procurement-request approval now
+  // reject self-approval — a distinct identity from whoever created the
+  // budget/request is needed for every approve() call below.
+  const approverEmail = 'e2e-proc-approver@test.bpfmps.local';
   const noPermEmail = 'e2e-proc-noperm@test.bpfmps.local';
   const password = 'E2ETestPassword123!';
 
   let adminUserId: string;
+  let approverUserId: string;
   let noPermUserId: string;
   let adminToken: string;
   let adminPrivateKeyPem: string;
+  let approverToken: string;
+  let approverPrivateKeyPem: string;
   let noPermToken: string;
   let orgId: string;
   let roleId: string;
+  let approverRoleId: string;
   let fiscalYearId: string;
   let allocationId: string;
   let planId: string;
@@ -128,6 +136,36 @@ describe('Procurement (e2e)', () => {
       });
     }
 
+    approverRoleId = (
+      await prisma.role.upsert({
+        where: { name: '[E2E] Procurement Approver' },
+        create: { name: '[E2E] Procurement Approver' },
+        update: {},
+      })
+    ).id;
+    for (const [resource, action] of [
+      ['budget', 'approve'],
+      ['budget', 'read'],
+      ['procurement', 'approve'],
+      ['procurement', 'read'],
+    ]) {
+      const permission = await prisma.permission.upsert({
+        where: { resource_action: { resource, action } },
+        create: { resource, action, description: `${resource}:${action}` },
+        update: {},
+      });
+      await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: approverRoleId,
+            permissionId: permission.id,
+          },
+        },
+        create: { roleId: approverRoleId, permissionId: permission.id },
+        update: {},
+      });
+    }
+
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
 
     const admin = await prisma.user.upsert({
@@ -149,6 +187,26 @@ describe('Procurement (e2e)', () => {
       },
     });
     adminUserId = admin.id;
+
+    const approver = await prisma.user.upsert({
+      where: { email: approverEmail },
+      create: {
+        email: approverEmail,
+        firstName: '[E2E]',
+        lastName: 'ProcApprover',
+        passwordHash,
+        status: 'ACTIVE',
+        organizationId: orgId,
+        roles: { create: { roleId: approverRoleId } },
+      },
+      update: {
+        passwordHash,
+        status: 'ACTIVE',
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+    approverUserId = approver.id;
 
     const noPerm = await prisma.user.upsert({
       where: { email: noPermEmail },
@@ -180,6 +238,20 @@ describe('Procurement (e2e)', () => {
       .post('/api/v1/users/me/signing-key')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ publicKeyPem: adminKeyPair.publicKeyPem })
+      .expect(201);
+
+    const approverLogin = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: approverEmail, password })
+      .expect(200);
+    approverToken = (approverLogin.body as LoginResponseBody).accessToken;
+
+    const approverKeyPair = generateEd25519KeyPair();
+    approverPrivateKeyPem = approverKeyPair.privateKeyPem;
+    await request(app.getHttpServer())
+      .post('/api/v1/users/me/signing-key')
+      .set('Authorization', `Bearer ${approverToken}`)
+      .send({ publicKeyPem: approverKeyPair.publicKeyPem })
       .expect(201);
 
     const noPermLogin = await request(app.getHttpServer())
@@ -228,12 +300,12 @@ describe('Procurement (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/approve`)
-      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .send(
         signRequest(
           'POST',
           `/api/v1/budgets/${budgetId}/approve`,
-          adminPrivateKeyPem,
+          approverPrivateKeyPem,
         ),
       )
       .expect(200);
@@ -282,18 +354,19 @@ describe('Procurement (e2e)', () => {
   });
 
   afterAll(async () => {
-    await prisma.session.deleteMany({
-      where: { userId: { in: [adminUserId, noPermUserId] } },
-    });
-    await prisma.userRole.deleteMany({ where: { userId: adminUserId } });
+    const userIds = [adminUserId, approverUserId, noPermUserId];
+    await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.userRole.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.securityEvent.deleteMany({
-      where: { userId: { in: [adminUserId, noPermUserId] } },
+      where: { userId: { in: userIds } },
     });
-    await prisma.user.deleteMany({
-      where: { id: { in: [adminUserId, noPermUserId] } },
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    await prisma.rolePermission.deleteMany({
+      where: { roleId: { in: [roleId, approverRoleId] } },
     });
-    await prisma.rolePermission.deleteMany({ where: { roleId } });
-    await prisma.role.delete({ where: { id: roleId } });
+    await prisma.role.deleteMany({
+      where: { id: { in: [roleId, approverRoleId] } },
+    });
     await app.close();
   });
 
@@ -372,7 +445,7 @@ describe('Procurement (e2e)', () => {
     // --- Approve request: this is the Budget↔Procurement integration point ---
     const approvedRequest = await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${requestId}/approve`)
-      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .expect(200);
     const approvedBody = approvedRequest.body as RequestBody;
     expect(approvedBody.status).toBe('APPROVED');
@@ -540,7 +613,7 @@ describe('Procurement (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${requestId}/approve`)
-      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .expect(200);
 
     const tenderResponse = await request(app.getHttpServer())

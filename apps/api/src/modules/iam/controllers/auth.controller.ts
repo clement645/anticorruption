@@ -8,6 +8,7 @@ import {
   Res,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
 import { ApiTags } from '@nestjs/swagger';
 import type { CookieOptions, Request, Response } from 'express';
 import { AuthService } from '../services/auth.service';
@@ -32,7 +33,15 @@ export class AuthController {
     private readonly config: ConfigService<EnvConfig, true>,
   ) {}
 
+  // Gap-audit hardening: the global rate limit (RATE_LIMIT_MAX/_TTL) is the
+  // same generous ceiling every other route gets, which gives a
+  // distributed brute-force attempt no meaningful resistance beyond
+  // account lockout (the audit's own conclusion: this is Low severity —
+  // lockout is the real backstop — so this is deliberately a moderate
+  // tightening, not an aggressive one that would risk false-positiving
+  // legitimate concurrent use, e.g. a shared office login).
   @Public()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(
@@ -111,6 +120,7 @@ export class AuthController {
    * the `X-Step-Up-Token` header on routes decorated with
    * @RequireStepUp() — see StepUpGuard.
    */
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post('step-up')
   @HttpCode(HttpStatus.OK)
   async stepUp(@Body() dto: StepUpDto, @CurrentUser() user: AuthenticatedUser) {

@@ -15,13 +15,20 @@ import { AuditService } from '../../audit/audit.service';
 import { BLOCKCHAIN_ADAPTER } from '../../blockchain/blockchain.constants';
 import { OBJECT_STORAGE_ADAPTER } from '../../storage/storage.constants';
 import { EvidenceLocationDetector } from '../../risk/services/evidence-location.detector';
+import { assertSameOrganization } from '../../../common/authz/organization-scope';
+import { sanitizeFilenameForStorageKey } from '../../../common/storage/sanitize-filename';
 import type { UploadEvidenceDto } from '../dto/upload-evidence.dto';
 import type {
   ProjectEvidenceDownload,
   ProjectEvidenceView,
 } from '../projects.types';
 
-type Actor = { sub: string; email: string; organizationId: string | null };
+type Actor = {
+  sub: string;
+  email: string;
+  organizationId: string | null;
+  roles: string[];
+};
 type RequestMeta = { ipAddress?: string; userAgent?: string };
 
 function toView(e: ProjectEvidence): ProjectEvidenceView {
@@ -73,6 +80,13 @@ export class EvidenceService {
     if (!project) {
       throw new NotFoundException('Project not found');
     }
+    await assertSameOrganization(actor, project.organizationId, 'project', {
+      auditService: this.auditService,
+      resourceType: 'Project',
+      resourceId: projectId,
+      action: 'uploadEvidence',
+      requestMeta,
+    });
 
     if (dto.inspectionId) {
       const inspection = await this.prisma.inspection.findUnique({
@@ -103,7 +117,7 @@ export class EvidenceService {
     }
 
     const fileHash = sha256HexBuffer(content);
-    const storageKey = `evidence/${projectId}/${randomUUID()}-${dto.fileName}`;
+    const storageKey = `evidence/${projectId}/${randomUUID()}-${sanitizeFilenameForStorageKey(dto.fileName)}`;
 
     await this.storage.putObject({
       key: storageKey,
@@ -212,9 +226,30 @@ export class EvidenceService {
    * somehow still produces valid-but-wrong plaintext — that case is
    * reported via `hashVerified: false` rather than silently handing back
    * bad content.
+   *
+   * Scoped by organization (F-001), unlike the plain metadata `getView()`/
+   * `list()` above: this is the one read path in this service that
+   * discloses actual file content, not just metadata, so it gets the same
+   * write-side-equivalent scrutiny rather than being deferred to the
+   * broader read-visibility question Phase 2's ABAC work will settle.
    */
-  async download(id: string): Promise<ProjectEvidenceDownload> {
+  async download(id: string, actor: Actor): Promise<ProjectEvidenceDownload> {
     const evidence = await this.getByIdOrThrow(id);
+    const project = await this.prisma.project.findUnique({
+      where: { id: evidence.projectId },
+      select: { organizationId: true },
+    });
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+    await assertSameOrganization(actor, project.organizationId, 'evidence', {
+      auditService: this.auditService,
+      resourceType: 'ProjectEvidence',
+      resourceId: id,
+      action: 'download',
+      requestMeta: {},
+    });
+
     let content: Buffer;
     try {
       content = await this.storage.getObject(evidence.storageKey);

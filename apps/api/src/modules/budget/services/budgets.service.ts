@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,8 +9,17 @@ import { Prisma } from '@bpfmps/database';
 import type { Allocation, BudgetStatus } from '@bpfmps/database';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
+import { assertSameOrganization } from '../../../common/authz/organization-scope';
+import { PolicyService } from '../../../common/policy/policy.service';
 import type { CreateBudgetDto } from '../dto/create-budget.dto';
 import type { BudgetView } from '../budget.types';
+
+type Actor = {
+  sub: string;
+  email: string;
+  organizationId: string | null;
+  roles: string[];
+};
 
 type BudgetWithLines = Prisma.BudgetPlanGetPayload<{
   include: { lines: true };
@@ -60,13 +70,28 @@ export class BudgetsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly policy: PolicyService,
   ) {}
 
   async create(
     dto: CreateBudgetDto,
-    actor: { sub: string; email: string; organizationId: string | null },
+    actor: Actor,
     requestMeta: { ipAddress?: string; userAgent?: string },
   ): Promise<BudgetView> {
+    // Closes F-001 at the point of creation: a non-Super-Administrator actor
+    // can only ever create a budget for their OWN organization — the client
+    // body is no longer trusted to place a budget wherever it likes. This
+    // is a 403, not a silent override, so a caller that got this wrong sees
+    // exactly why rather than a budget landing somewhere unexpected.
+    if (
+      !actor.roles.includes('Super Administrator') &&
+      dto.organizationId !== actor.organizationId
+    ) {
+      throw new ForbiddenException(
+        'You can only create a budget for your own organization',
+      );
+    }
+
     const fiscalYear = await this.prisma.fiscalYear.findUnique({
       where: { id: dto.fiscalYearId },
     });
@@ -195,10 +220,17 @@ export class BudgetsService {
 
   async submit(
     id: string,
-    actor: { sub: string; email: string; organizationId: string | null },
+    actor: Actor,
     requestMeta: { ipAddress?: string; userAgent?: string },
   ): Promise<BudgetView> {
     const budget = await this.getByIdOrThrow(id);
+    await assertSameOrganization(actor, budget.organizationId, 'budget', {
+      auditService: this.auditService,
+      resourceType: 'Budget',
+      resourceId: id,
+      action: 'submit',
+      requestMeta,
+    });
     if (budget.status !== 'DRAFT') {
       throw new BadRequestException(
         `Cannot submit a budget in status ${budget.status} — only DRAFT budgets can be submitted`,
@@ -229,20 +261,66 @@ export class BudgetsService {
 
   async approve(
     id: string,
-    actor: { sub: string; email: string; organizationId: string | null },
+    actor: Actor,
     requestMeta: { ipAddress?: string; userAgent?: string },
     verifiedSignature?: {
       signature: string;
       keyId: string;
       signedPayload: string;
     },
+    stepUpVerified = false,
   ): Promise<BudgetView> {
     const budget = await this.getByIdOrThrow(id);
+    await assertSameOrganization(actor, budget.organizationId, 'budget', {
+      auditService: this.auditService,
+      resourceType: 'Budget',
+      resourceId: id,
+      action: 'approve',
+      requestMeta,
+    });
+    // F-003: the actor who created/submitted this budget cannot also be the
+    // one who approves it — mirrors PaymentsService.castApproval()'s
+    // existing, already-correct self-approval guard. Enforcement was
+    // previously entirely operational (relying on seed data never granting
+    // one account both roles); this makes it a real, code-level invariant.
+    if (budget.createdById && budget.createdById === actor.sub) {
+      await this.auditService
+        .append({
+          eventType: 'AUTHORIZATION_DENIED',
+          actorId: actor.sub,
+          actorEmail: actor.email,
+          organizationId: actor.organizationId ?? undefined,
+          resourceType: 'Budget',
+          resourceId: id,
+          action: 'approve',
+          payload: { reason: 'self_approval_denied' },
+          ipAddress: requestMeta.ipAddress,
+          userAgent: requestMeta.userAgent,
+        })
+        .catch(() => undefined);
+      throw new ForbiddenException(
+        'You cannot approve a budget you created yourself',
+      );
+    }
     if (budget.status !== 'PENDING_APPROVAL') {
       throw new BadRequestException(
         `Cannot approve a budget in status ${budget.status} — only PENDING_APPROVAL budgets can be approved`,
       );
     }
+    await this.policy.enforce(
+      {
+        action: 'budget:approve',
+        actor,
+        resource: {
+          organizationId: budget.organizationId,
+          amount: budget.lines.reduce((sum, line) => sum + Number(line.authorizedAmount), 0),
+        },
+        stepUpVerified,
+      },
+      'Budget',
+      id,
+      requestMeta,
+    );
 
     const allocations = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.budgetPlan.update({
@@ -312,10 +390,17 @@ export class BudgetsService {
   async reject(
     id: string,
     reason: string | undefined,
-    actor: { sub: string; email: string; organizationId: string | null },
+    actor: Actor,
     requestMeta: { ipAddress?: string; userAgent?: string },
   ): Promise<BudgetView> {
     const budget = await this.getByIdOrThrow(id);
+    await assertSameOrganization(actor, budget.organizationId, 'budget', {
+      auditService: this.auditService,
+      resourceType: 'Budget',
+      resourceId: id,
+      action: 'reject',
+      requestMeta,
+    });
     if (budget.status !== 'PENDING_APPROVAL') {
       throw new BadRequestException(
         `Cannot reject a budget in status ${budget.status} — only PENDING_APPROVAL budgets can be rejected`,

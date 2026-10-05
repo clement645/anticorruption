@@ -77,22 +77,29 @@ describe('Project Verification (e2e)', () => {
   let prisma: PrismaService;
 
   const fullEmail = 'e2e-projects-full@test.bpfmps.local';
+  const approverEmail = 'e2e-projects-approver@test.bpfmps.local';
   const pmEmail = 'e2e-projects-pm@test.bpfmps.local';
   const engEmail = 'e2e-projects-eng@test.bpfmps.local';
   const noPermEmail = 'e2e-projects-noperm@test.bpfmps.local';
   const password = 'E2ETestPassword123!';
 
   let fullUserId: string;
+  let approverUserId: string;
   let pmUserId: string;
   let engUserId: string;
   let noPermUserId: string;
   let fullToken: string;
   let fullPrivateKeyPem: string;
+  // Gap-audit fix (F-003): budget/procurement-request approval now rejects
+  // self-approval, so fixture setup needs a distinct approver identity from
+  // whoever created the budget/request — fullToken can no longer do both.
+  let approverToken: string;
   let pmToken: string;
   let engToken: string;
   let noPermToken: string;
   let orgId: string;
   let fullRoleId: string;
+  let approverRoleId: string;
   let pmRoleId: string;
   let engRoleId: string;
   let fiscalYearId: string;
@@ -181,6 +188,13 @@ describe('Project Verification (e2e)', () => {
       ['risk', 'read'],
     ]);
 
+    approverRoleId = await grantRole('[E2E] Projects Approver', [
+      ['budget', 'approve'],
+      ['budget', 'read'],
+      ['procurement', 'approve'],
+      ['procurement', 'read'],
+    ]);
+
     pmRoleId = await grantRole('[E2E] Projects Manager', [
       ['project', 'read'],
       ['project', 'manage'],
@@ -218,6 +232,11 @@ describe('Project Verification (e2e)', () => {
     }
 
     fullUserId = await upsertUser(fullEmail, 'ProjectsFull', fullRoleId);
+    approverUserId = await upsertUser(
+      approverEmail,
+      'ProjectsApprover',
+      approverRoleId,
+    );
     pmUserId = await upsertUser(pmEmail, 'ProjectsPM', pmRoleId);
     engUserId = await upsertUser(engEmail, 'ProjectsEngineer', engRoleId);
 
@@ -248,6 +267,7 @@ describe('Project Verification (e2e)', () => {
     }
 
     fullToken = await login(fullEmail);
+    approverToken = await login(approverEmail);
     pmToken = await login(pmEmail);
     engToken = await login(engEmail);
     noPermToken = await login(noPermEmail);
@@ -258,6 +278,16 @@ describe('Project Verification (e2e)', () => {
       .post('/api/v1/users/me/signing-key')
       .set('Authorization', `Bearer ${fullToken}`)
       .send({ publicKeyPem: fullKeyPair.publicKeyPem })
+      .expect(201);
+
+    // budget:approve is @RequireSignature() — the approver needs their own
+    // enrolled key too.
+    const approverKeyPair = generateEd25519KeyPair();
+    const approverPrivateKeyPem = approverKeyPair.privateKeyPem;
+    await request(app.getHttpServer())
+      .post('/api/v1/users/me/signing-key')
+      .set('Authorization', `Bearer ${approverToken}`)
+      .send({ publicKeyPem: approverKeyPair.publicKeyPem })
       .expect(201);
 
     const fy = await request(app.getHttpServer())
@@ -297,12 +327,12 @@ describe('Project Verification (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .send(
         signRequest(
           'POST',
           `/api/v1/budgets/${budgetId}/approve`,
-          fullPrivateKeyPem,
+          approverPrivateKeyPem,
         ),
       )
       .expect(200);
@@ -331,7 +361,13 @@ describe('Project Verification (e2e)', () => {
   });
 
   afterAll(async () => {
-    const userIds = [fullUserId, pmUserId, engUserId, noPermUserId];
+    const userIds = [
+      fullUserId,
+      approverUserId,
+      pmUserId,
+      engUserId,
+      noPermUserId,
+    ];
     await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.userRole.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.securityEvent.deleteMany({
@@ -339,10 +375,12 @@ describe('Project Verification (e2e)', () => {
     });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await prisma.rolePermission.deleteMany({
-      where: { roleId: { in: [fullRoleId, pmRoleId, engRoleId] } },
+      where: {
+        roleId: { in: [fullRoleId, approverRoleId, pmRoleId, engRoleId] },
+      },
     });
     await prisma.role.deleteMany({
-      where: { id: { in: [fullRoleId, pmRoleId, engRoleId] } },
+      where: { id: { in: [fullRoleId, approverRoleId, pmRoleId, engRoleId] } },
     });
     await app.close();
   });
@@ -368,7 +406,7 @@ describe('Project Verification (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${requestId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .expect(200);
 
     const tender = await request(app.getHttpServer())
@@ -807,6 +845,36 @@ describe('Project Verification (e2e)', () => {
     const downloadBody = download.body as EvidenceDownloadBody;
     expect(downloadBody.hashVerified).toBe(true);
     expect(downloadBody.contentBase64).toBe(contentBase64);
+  });
+
+  // Gap-audit regression (path traversal): a client-supplied fileName is
+  // sanitized before it's interpolated into the object-storage key. The
+  // original name is preserved as metadata; only the storage key must be
+  // free of traversal segments and stay inside this project's own prefix.
+  it('neutralizes path-traversal sequences in a client fileName when building the storage key', async () => {
+    const { projectId } = await createPlannedProject();
+
+    const upload = await request(app.getHttpServer())
+      .post(`/api/v1/projects/${projectId}/evidence`)
+      .set('Authorization', `Bearer ${engToken}`)
+      .send({
+        fileName: '../../../other-project/secret.txt',
+        mimeType: 'text/plain',
+        fileContentBase64: Buffer.from('traversal probe').toString('base64'),
+      })
+      .expect(201);
+    const evidenceId = (upload.body as EvidenceBody & { id: string }).id;
+
+    const row = await prisma.projectEvidence.findUniqueOrThrow({
+      where: { id: evidenceId },
+      select: { storageKey: true, fileName: true },
+    });
+    expect(row.fileName).toBe('../../../other-project/secret.txt');
+    expect(row.storageKey.startsWith(`evidence/${projectId}/`)).toBe(true);
+    expect(row.storageKey).not.toContain('..');
+    expect(row.storageKey.slice(`evidence/${projectId}/`.length)).not.toContain(
+      '/',
+    );
   });
 
   it('rejects evidence upload without evidence:upload, and inspectionId must belong to the same project', async () => {

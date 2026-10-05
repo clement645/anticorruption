@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,6 +9,7 @@ import { Prisma } from '@bpfmps/database';
 import type { Allocation, Commitment } from '@bpfmps/database';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
+import { assertSameOrganization } from '../../../common/authz/organization-scope';
 import type { CreateCommitmentDto } from '../dto/create-commitment.dto';
 import type { CreateExpenditureDto } from '../dto/create-expenditure.dto';
 import type { CreateAdjustmentDto } from '../dto/create-adjustment.dto';
@@ -18,7 +20,12 @@ import type {
   ExpenditureView,
 } from '../budget.types';
 
-type Actor = { sub: string; email: string; organizationId: string | null };
+type Actor = {
+  sub: string;
+  email: string;
+  organizationId: string | null;
+  roles: string[];
+};
 type RequestMeta = { ipAddress?: string; userAgent?: string };
 
 function availableOf(allocation: {
@@ -137,6 +144,24 @@ export class AllocationsService {
   ): Promise<CommitmentView> {
     const amount = new Prisma.Decimal(dto.amount);
 
+    // Checked ahead of the locking transaction, not inside it — no reason
+    // to take a row lock just to then discover the actor has no business
+    // touching this organization's allocation at all.
+    const scopeCheck = await this.prisma.allocation.findUnique({
+      where: { id: allocationId },
+      select: { organizationId: true },
+    });
+    if (!scopeCheck) {
+      throw new NotFoundException('Allocation not found');
+    }
+    await assertSameOrganization(actor, scopeCheck.organizationId, 'allocation', {
+      auditService: this.auditService,
+      resourceType: 'Allocation',
+      resourceId: allocationId,
+      action: 'createCommitment',
+      requestMeta,
+    });
+
     const commitment = await this.prisma.$transaction(async (tx) => {
       const allocation = await this.lockAllocation(tx, allocationId);
       if (allocation.status !== 'ACTIVE') {
@@ -194,10 +219,23 @@ export class AllocationsService {
   ): Promise<CommitmentView> {
     const existing = await this.prisma.commitment.findUnique({
       where: { id: commitmentId },
+      include: { allocation: { select: { organizationId: true } } },
     });
     if (!existing) {
       throw new NotFoundException('Commitment not found');
     }
+    await assertSameOrganization(
+      actor,
+      existing.allocation.organizationId,
+      'commitment',
+      {
+        auditService: this.auditService,
+        resourceType: 'Commitment',
+        resourceId: commitmentId,
+        action: 'release',
+        requestMeta,
+      },
+    );
     if (existing.status !== 'ACTIVE') {
       throw new BadRequestException(
         `Commitment is ${existing.status}, not ACTIVE`,
@@ -246,10 +284,23 @@ export class AllocationsService {
   ): Promise<ExpenditureView> {
     const existing = await this.prisma.commitment.findUnique({
       where: { id: commitmentId },
+      include: { allocation: { select: { organizationId: true } } },
     });
     if (!existing) {
       throw new NotFoundException('Commitment not found');
     }
+    await assertSameOrganization(
+      actor,
+      existing.allocation.organizationId,
+      'commitment',
+      {
+        auditService: this.auditService,
+        resourceType: 'Commitment',
+        resourceId: commitmentId,
+        action: 'createExpenditure',
+        requestMeta,
+      },
+    );
     if (existing.status !== 'ACTIVE') {
       throw new BadRequestException(
         `Commitment is ${existing.status}, not ACTIVE`,
@@ -331,6 +382,13 @@ export class AllocationsService {
     if (!allocation) {
       throw new NotFoundException('Allocation not found');
     }
+    await assertSameOrganization(actor, allocation.organizationId, 'allocation', {
+      auditService: this.auditService,
+      resourceType: 'Allocation',
+      resourceId: allocationId,
+      action: 'createAdjustment',
+      requestMeta,
+    });
 
     const adjustment = await this.prisma.budgetAdjustment.create({
       data: {
@@ -384,9 +442,43 @@ export class AllocationsService {
   ): Promise<BudgetAdjustmentView> {
     const existing = await this.prisma.budgetAdjustment.findUnique({
       where: { id: adjustmentId },
+      include: { allocation: { select: { organizationId: true } } },
     });
     if (!existing) {
       throw new NotFoundException('Adjustment not found');
+    }
+    await assertSameOrganization(
+      actor,
+      existing.allocation.organizationId,
+      'adjustment',
+      {
+        auditService: this.auditService,
+        resourceType: 'BudgetAdjustment',
+        resourceId: adjustmentId,
+        action: 'approve',
+        requestMeta,
+      },
+    );
+    // F-003: same self-approval guard as budget/procurement-request
+    // approval and invoice verification.
+    if (existing.requestedById && existing.requestedById === actor.sub) {
+      await this.auditService
+        .append({
+          eventType: 'AUTHORIZATION_DENIED',
+          actorId: actor.sub,
+          actorEmail: actor.email,
+          organizationId: actor.organizationId ?? undefined,
+          resourceType: 'BudgetAdjustment',
+          resourceId: adjustmentId,
+          action: 'approve',
+          payload: { reason: 'self_approval_denied' },
+          ipAddress: requestMeta.ipAddress,
+          userAgent: requestMeta.userAgent,
+        })
+        .catch(() => undefined);
+      throw new ForbiddenException(
+        'You cannot approve a budget adjustment you requested yourself',
+      );
     }
     if (existing.status !== 'PENDING') {
       throw new BadRequestException(
@@ -472,10 +564,23 @@ export class AllocationsService {
   ): Promise<BudgetAdjustmentView> {
     const existing = await this.prisma.budgetAdjustment.findUnique({
       where: { id: adjustmentId },
+      include: { allocation: { select: { organizationId: true } } },
     });
     if (!existing) {
       throw new NotFoundException('Adjustment not found');
     }
+    await assertSameOrganization(
+      actor,
+      existing.allocation.organizationId,
+      'adjustment',
+      {
+        auditService: this.auditService,
+        resourceType: 'BudgetAdjustment',
+        resourceId: adjustmentId,
+        action: 'reject',
+        requestMeta,
+      },
+    );
     if (existing.status !== 'PENDING') {
       throw new BadRequestException(
         `Adjustment is ${existing.status}, not PENDING`,

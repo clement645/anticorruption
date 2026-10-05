@@ -66,13 +66,21 @@ describe('Citizen Transparency Portal (e2e)', () => {
   let prisma: PrismaService;
 
   const fullEmail = 'e2e-transparency-full@test.bpfmps.local';
+  // Gap-audit fix (F-003): approve() now rejects self-approval. Every
+  // budget/procurement-request created as fixture setup here is created by
+  // fullToken, so a separate approver identity does the approving.
+  const approverEmail = 'e2e-transparency-approver@test.bpfmps.local';
   const password = 'E2ETestPassword123!';
 
   let fullUserId: string;
+  let approverUserId: string;
   let fullToken: string;
   let fullPrivateKeyPem: string;
+  let approverToken: string;
+  let approverPrivateKeyPem: string;
   let orgId: string;
   let fullRoleId: string;
+  let approverRoleId: string;
   let fiscalYearId: string;
   let allocationId: string;
   let planId: string;
@@ -155,6 +163,13 @@ describe('Citizen Transparency Portal (e2e)', () => {
       ['supplier', 'manage'],
     ]);
 
+    approverRoleId = await grantRole('[E2E] Transparency Approver', [
+      ['budget', 'approve'],
+      ['budget', 'read'],
+      ['procurement', 'approve'],
+      ['procurement', 'read'],
+    ]);
+
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
     const admin = await prisma.user.upsert({
       where: { email: fullEmail },
@@ -176,6 +191,26 @@ describe('Citizen Transparency Portal (e2e)', () => {
     });
     fullUserId = admin.id;
 
+    const approver = await prisma.user.upsert({
+      where: { email: approverEmail },
+      create: {
+        email: approverEmail,
+        firstName: '[E2E]',
+        lastName: 'TransparencyApprover',
+        passwordHash,
+        status: 'ACTIVE',
+        organizationId: orgId,
+        roles: { create: { roleId: approverRoleId } },
+      },
+      update: {
+        passwordHash,
+        status: 'ACTIVE',
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+    approverUserId = approver.id;
+
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .send({ email: fullEmail, password })
@@ -188,6 +223,20 @@ describe('Citizen Transparency Portal (e2e)', () => {
       .post('/api/v1/users/me/signing-key')
       .set('Authorization', `Bearer ${fullToken}`)
       .send({ publicKeyPem: fullKeyPair.publicKeyPem })
+      .expect(201);
+
+    const approverLogin = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: approverEmail, password })
+      .expect(200);
+    approverToken = (approverLogin.body as LoginResponseBody).accessToken;
+
+    const approverKeyPair = generateEd25519KeyPair();
+    approverPrivateKeyPem = approverKeyPair.privateKeyPem;
+    await request(app.getHttpServer())
+      .post('/api/v1/users/me/signing-key')
+      .set('Authorization', `Bearer ${approverToken}`)
+      .send({ publicKeyPem: approverKeyPair.publicKeyPem })
       .expect(201);
 
     const fy = await request(app.getHttpServer())
@@ -227,12 +276,12 @@ describe('Citizen Transparency Portal (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .send(
         signRequest(
           'POST',
           `/api/v1/budgets/${budgetId}/approve`,
-          fullPrivateKeyPem,
+          approverPrivateKeyPem,
         ),
       )
       .expect(200);
@@ -261,12 +310,19 @@ describe('Citizen Transparency Portal (e2e)', () => {
   });
 
   afterAll(async () => {
-    await prisma.session.deleteMany({ where: { userId: fullUserId } });
-    await prisma.userRole.deleteMany({ where: { userId: fullUserId } });
-    await prisma.securityEvent.deleteMany({ where: { userId: fullUserId } });
-    await prisma.user.deleteMany({ where: { id: fullUserId } });
-    await prisma.rolePermission.deleteMany({ where: { roleId: fullRoleId } });
-    await prisma.role.deleteMany({ where: { id: fullRoleId } });
+    const userIds = [fullUserId, approverUserId];
+    await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.userRole.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.securityEvent.deleteMany({
+      where: { userId: { in: userIds } },
+    });
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    await prisma.rolePermission.deleteMany({
+      where: { roleId: { in: [fullRoleId, approverRoleId] } },
+    });
+    await prisma.role.deleteMany({
+      where: { id: { in: [fullRoleId, approverRoleId] } },
+    });
     await app.close();
   });
 
@@ -293,7 +349,7 @@ describe('Citizen Transparency Portal (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${requestId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .expect(200);
 
     const tender = await request(app.getHttpServer())

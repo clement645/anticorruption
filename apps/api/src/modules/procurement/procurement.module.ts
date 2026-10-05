@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { PolicyModule } from '../../common/policy/policy.module';
 import { BudgetModule } from '../budget/budget.module';
 import { RiskModule } from '../risk/risk.module';
 import { SuppliersService } from './services/suppliers.service';
@@ -17,7 +18,7 @@ import {
 } from './controllers/bids.controller';
 
 @Module({
-  imports: [AuditModule, BudgetModule, RiskModule],
+  imports: [AuditModule, BudgetModule, RiskModule, PolicyModule],
   controllers: [
     SuppliersController,
     ProcurementPlansController,

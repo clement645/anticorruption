@@ -1829,3 +1829,26 @@ sequence the user set at its start, with one deliberate, explicit
 exception: citizen voting on project priorities was skipped mid-sequence
 per direct user instruction ("we exclude citizen voting") and remains
 unbuilt, not abandoned — a future request, not a gap in this account.
+
+## Implementation Roadmap — Phase 1: Security & Authorization ✅ (verified locally)
+
+First phase of the dependency-ordered roadmap derived from the post-launch gap audit.
+Closes findings F-001 through F-004, the TOTP replay gap, path traversal in storage
+keys, the F-007 font CSP, and login/step-up/whistleblower rate limits. Full detail
+lives in SECURITY.md § Security & Authorization Hardening.
+
+- **Shared authorization helper.** `assertSameOrganization()` is now async and writes an
+  `AUTHORIZATION_DENIED` audit event before throwing. All 18 call sites were converted.
+- **Self-approval and self-escalation rejections are audited** with `reason` payloads
+  (`self_approval_denied`, `self_targeting_denied`).
+- **Procurement Officer split.** `procurement:evaluate` and `procurement:award` removed
+  from Procurement Officer; award granted to Approving Officer. The dev database was
+  updated directly. Production needs the same one-time grant change, because the seed
+  upserts and never revokes.
+- **Step-up challenge UI.** `apps/web/src/lib/stepUp.ts` and
+  `StepUpChallengeModal.vue` are built and unit-tested but intentionally unmounted until
+  Phase 5 wires them into payment execution.
+- **Regression tests added:** concurrent refresh, self-escalation, TOTP replay,
+  cross-organization submit with audit assertion, and path-traversal neutralization.
+- **Verification:** full e2e suite 16/16 suites, 136/136 tests; web unit tests 6/6; web
+  build and lint clean.

@@ -276,6 +276,13 @@ model MfaMethod {
   secretEncrypted  String?
   backupCodeHashes String[]
   enabled          Boolean  @default(false)
+  // Gap-audit fix (F-TOTP-replay): the TOTP time-step (Unix seconds / 30,
+  // not a raw timestamp) most recently accepted for this method. A code
+  // is otherwise stateless and valid for the rest of its current step
+  // once generated — `MfaService.verifyCode()` rejects a code whose step
+  // matches this value, the same single-use discipline backup codes
+  // already had via `backupCodeHashes` removal, just applied to TOTP.
+  lastConsumedStep Int?
   createdAt        DateTime @default(now())
 
   @@unique([userId, type])

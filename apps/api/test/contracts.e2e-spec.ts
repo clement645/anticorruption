@@ -68,6 +68,10 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
   let prisma: PrismaService;
 
   const fullEmail = 'e2e-contracts-full@test.bpfmps.local';
+  // Gap-audit fix (F-003): budget/procurement-request approval and invoice
+  // verification now reject self-approval — fixture setup needs a distinct
+  // identity from whoever created/submitted the thing being approved.
+  const verifierEmail = 'e2e-contracts-verifier@test.bpfmps.local';
   const approver1Email = 'e2e-contracts-approver1@test.bpfmps.local';
   const approver2Email = 'e2e-contracts-approver2@test.bpfmps.local';
   const approver3Email = 'e2e-contracts-approver3@test.bpfmps.local';
@@ -75,6 +79,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
   const password = 'E2ETestPassword123!';
 
   let fullUserId: string;
+  let verifierUserId: string;
   let approver1UserId: string;
   let approver2UserId: string;
   let approver3UserId: string;
@@ -82,12 +87,15 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
   let fullToken: string;
   let fullTotpSecret: string;
   let fullPrivateKeyPem: string;
+  let verifierToken: string;
+  let verifierPrivateKeyPem: string;
   let approver1Token: string;
   let approver2Token: string;
   let approver3Token: string;
   let noPermToken: string;
   let orgId: string;
   let fullRoleId: string;
+  let verifierRoleId: string;
   let approverRoleId: string;
   let fiscalYearId: string;
   let allocationId: string;
@@ -175,6 +183,18 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       ['risk', 'review'],
     ]);
 
+    // Distinct from fullRoleId specifically so budget/procurement-request
+    // approval and invoice verification are never self-approval in this
+    // file's fixture setup (F-003).
+    verifierRoleId = await grantRole('[E2E] Contracts Verifier', [
+      ['budget', 'approve'],
+      ['budget', 'read'],
+      ['procurement', 'approve'],
+      ['procurement', 'read'],
+      ['invoice', 'verify'],
+      ['invoice', 'read'],
+    ]);
+
     // A role with ONLY payment:approve/read — used by three distinct users
     // so approvals can be cast by genuinely different people, and so
     // self-approval / duplicate-approval / concurrency tests are real.
@@ -210,6 +230,11 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
     }
 
     fullUserId = await upsertUser(fullEmail, 'ContractsFull', fullRoleId);
+    verifierUserId = await upsertUser(
+      verifierEmail,
+      'ContractsVerifier',
+      verifierRoleId,
+    );
     approver1UserId = await upsertUser(
       approver1Email,
       'Approver1',
@@ -253,6 +278,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
     }
 
     fullToken = await login(fullEmail);
+    verifierToken = await login(verifierEmail);
 
     const fullKeyPair = generateEd25519KeyPair();
     fullPrivateKeyPem = fullKeyPair.privateKeyPem;
@@ -260,6 +286,14 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .post('/api/v1/users/me/signing-key')
       .set('Authorization', `Bearer ${fullToken}`)
       .send({ publicKeyPem: fullKeyPair.publicKeyPem })
+      .expect(201);
+
+    const verifierKeyPair = generateEd25519KeyPair();
+    verifierPrivateKeyPem = verifierKeyPair.privateKeyPem;
+    await request(app.getHttpServer())
+      .post('/api/v1/users/me/signing-key')
+      .set('Authorization', `Bearer ${verifierToken}`)
+      .send({ publicKeyPem: verifierKeyPair.publicKeyPem })
       .expect(201);
 
     // payment-requests/:id/execute is @RequireStepUp() (post-launch) — the
@@ -309,12 +343,12 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${verifierToken}`)
       .send(
         signRequest(
           'POST',
           `/api/v1/budgets/${budgetId}/approve`,
-          fullPrivateKeyPem,
+          verifierPrivateKeyPem,
         ),
       )
       .expect(200);
@@ -345,6 +379,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
   afterAll(async () => {
     const userIds = [
       fullUserId,
+      verifierUserId,
       approver1UserId,
       approver2UserId,
       approver3UserId,
@@ -371,10 +406,10 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
     });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await prisma.rolePermission.deleteMany({
-      where: { roleId: { in: [fullRoleId, approverRoleId] } },
+      where: { roleId: { in: [fullRoleId, verifierRoleId, approverRoleId] } },
     });
     await prisma.role.deleteMany({
-      where: { id: { in: [fullRoleId, approverRoleId] } },
+      where: { id: { in: [fullRoleId, verifierRoleId, approverRoleId] } },
     });
     await app.close();
   });
@@ -400,7 +435,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${requestId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${verifierToken}`)
       .expect(200);
 
     const tender = await request(app.getHttpServer())
@@ -458,7 +493,12 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
   /** Drives Contract -> active PO -> a verified Invoice, returning the resulting PaymentRequest id. */
   async function createReadyPaymentRequest(
     amount = 900_000,
-    verifierToken = fullToken,
+    // Gap-audit fix (F-003): renamed from `verifierToken` to avoid shadowing
+    // the outer fixture-level `verifierToken` this now defaults to — fullToken
+    // both submits (inside this helper) and, before this fix, also verified
+    // every invoice in this file, which invoice verification's new
+    // self-approval guard correctly rejects.
+    invoiceVerifierToken = verifierToken,
   ): Promise<{ paymentRequestId: string; invoiceId: string }> {
     const awardId = await createAward(amount);
     const contract = await request(app.getHttpServer())
@@ -509,7 +549,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
 
     const verified = await request(app.getHttpServer())
       .post(`/api/v1/invoices/${invoiceId}/verify`)
-      .set('Authorization', `Bearer ${verifierToken}`)
+      .set('Authorization', `Bearer ${invoiceVerifierToken}`)
       .expect(200);
     expect((verified.body as InvoiceBody).status).toBe('VERIFIED');
 
@@ -664,7 +704,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
     // Cannot verify an already-rejected invoice.
     await request(app.getHttpServer())
       .post(`/api/v1/invoices/${invoiceId}/verify`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${verifierToken}`)
       .expect(400);
   });
 
@@ -843,13 +883,13 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
   it('prevents self-approval and duplicate approval by the same user', async () => {
     const { paymentRequestId } = await createReadyPaymentRequest(
       300_000,
-      fullToken,
+      verifierToken,
     );
 
-    // fullToken verified this invoice — cannot also approve its payment.
+    // verifierToken verified this invoice — cannot also approve its payment.
     await request(app.getHttpServer())
       .post(`/api/v1/payment-requests/${paymentRequestId}/approvals`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${verifierToken}`)
       .send({ decision: 'APPROVE' })
       .expect(403);
 
@@ -868,10 +908,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
   });
 
   it('reaches APPROVED after 2 distinct approvals, and a REJECT rejects immediately', async () => {
-    const { paymentRequestId } = await createReadyPaymentRequest(
-      310_000,
-      fullToken,
-    );
+    const { paymentRequestId } = await createReadyPaymentRequest(310_000);
 
     const first = await request(app.getHttpServer())
       .post(`/api/v1/payment-requests/${paymentRequestId}/approvals`)
@@ -888,10 +925,8 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
     expect((second.body as PaymentRequestBody).status).toBe('APPROVED');
 
     // Now REJECTED-flavored test on a fresh request.
-    const { paymentRequestId: pr2 } = await createReadyPaymentRequest(
-      320_000,
-      fullToken,
-    );
+    const { paymentRequestId: pr2 } =
+      await createReadyPaymentRequest(320_000);
     const rejected = await request(app.getHttpServer())
       .post(`/api/v1/payment-requests/${pr2}/approvals`)
       .set('Authorization', `Bearer ${approver1Token}`)
@@ -912,10 +947,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       '2 reach the threshold and succeed, the row lock ensures the 3rd ' +
       'consistently observes the request is no longer PENDING',
     async () => {
-      const { paymentRequestId } = await createReadyPaymentRequest(
-        330_000,
-        fullToken,
-      );
+      const { paymentRequestId } = await createReadyPaymentRequest(330_000);
 
       const results = await Promise.all([
         request(app.getHttpServer())
@@ -955,10 +987,8 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
   );
 
   it('executes a payment, updates the budget, and marks the invoice PAID', async () => {
-    const { paymentRequestId, invoiceId } = await createReadyPaymentRequest(
-      340_000,
-      fullToken,
-    );
+    const { paymentRequestId, invoiceId } =
+      await createReadyPaymentRequest(340_000);
     await request(app.getHttpServer())
       .post(`/api/v1/payment-requests/${paymentRequestId}/approvals`)
       .set('Authorization', `Bearer ${approver1Token}`)
@@ -1023,10 +1053,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       'bug (status checked before the idempotency replay lookup) found ' +
       "during this phase's manual smoke testing",
     async () => {
-      const { paymentRequestId } = await createReadyPaymentRequest(
-        350_000,
-        fullToken,
-      );
+      const { paymentRequestId } = await createReadyPaymentRequest(350_000);
       await request(app.getHttpServer())
         .post(`/api/v1/payment-requests/${paymentRequestId}/approvals`)
         .set('Authorization', `Bearer ${approver1Token}`)
@@ -1076,10 +1103,7 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
   );
 
   it('under genuinely concurrent execute() calls sharing one Idempotency-Key, only one Expenditure is created', async () => {
-    const { paymentRequestId } = await createReadyPaymentRequest(
-      360_000,
-      fullToken,
-    );
+    const { paymentRequestId } = await createReadyPaymentRequest(360_000);
     await request(app.getHttpServer())
       .post(`/api/v1/payment-requests/${paymentRequestId}/approvals`)
       .set('Authorization', `Bearer ${approver1Token}`)

@@ -55,24 +55,94 @@ describe('AI Risk Engine (e2e)', () => {
   let prisma: PrismaService;
 
   const fullEmail = 'e2e-risk-full@test.bpfmps.local';
+  // Gap-audit fix (F-003): approve() now rejects self-approval. None of
+  // this file's tests are actually ABOUT self-approval — `fullToken`
+  // creates every budget/procurement-request purely as fixture setup for
+  // the risk detectors under test — so a separate approver identity
+  // handles every approve() call while fullToken keeps doing everything
+  // else (create/submit/tenders/bids/suppliers/alerts).
+  const approverEmail = 'e2e-risk-approver@test.bpfmps.local';
   const procOfficerEmail = 'e2e-risk-proc-officer@test.bpfmps.local';
   const noPermEmail = 'e2e-risk-noperm@test.bpfmps.local';
   const password = 'E2ETestPassword123!';
 
   let fullUserId: string;
+  let approverUserId: string;
   let procOfficerUserId: string;
   let noPermUserId: string;
   let fullToken: string;
   let fullPrivateKeyPem: string;
+  let approverToken: string;
+  let approverPrivateKeyPem: string;
   let procOfficerToken: string;
   let noPermToken: string;
   let orgId: string;
   let splitOrgId: string;
   let fullRoleId: string;
+  let approverRoleId: string;
   let procOfficerRoleId: string;
   let fiscalYearId: string;
   let allocationId: string;
   let planId: string;
+  // Gap-audit fix (F-001): create()/submit()/approve() now reject an actor
+  // acting outside their own organization. The split-procurement tests
+  // deliberately operate against a SEPARATE organization than fullToken's
+  // own (orgId) — see the splitOrgId comment below — so they need their
+  // own org-scoped creator/approver pair instead of fullToken/approverToken.
+  let splitCreatorUserId: string;
+  let splitCreatorToken: string;
+  let splitApproverUserId: string;
+  let splitApproverToken: string;
+  // Populated by the one test that creates its own one-off organization
+  // (highSplitOrg) and its own org-scoped actors for it; cleaned up in
+  // afterAll alongside every other fixture user.
+  const dynamicUserIds: string[] = [];
+  let passwordHash: string;
+  // approve() commits against an allocation that lives in the MAIN org
+  // (orgId), regardless of which org the request itself belongs to — so an
+  // approver scoped to a split-procurement org can create+submit fine but
+  // cannot pass AllocationsService.createCommitment()'s own org-scope check
+  // (F-001) when approving. The real-world equivalent of an actor allowed
+  // to approve across organizations is Super Administrator — the one
+  // documented bypass in assertSameOrganization() — so the split-org
+  // approvers below are granted the actual seeded role (read via upsert,
+  // never created/modified by this file) rather than a fixture-only one.
+  let superAdminRoleId: string;
+
+  async function createOrgScopedActor(
+    email: string,
+    lastName: string,
+    actorOrgId: string,
+    roleId: string,
+  ): Promise<{ userId: string; token: string }> {
+    const user = await prisma.user.upsert({
+      where: { email },
+      create: {
+        email,
+        firstName: '[E2E]',
+        lastName,
+        passwordHash,
+        status: 'ACTIVE',
+        organizationId: actorOrgId,
+        roles: { create: { roleId } },
+      },
+      update: {
+        passwordHash,
+        status: 'ACTIVE',
+        organizationId: actorOrgId,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email, password })
+      .expect(200);
+    return {
+      userId: user.id,
+      token: (login.body as LoginResponseBody).accessToken,
+    };
+  }
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -174,6 +244,13 @@ describe('AI Risk Engine (e2e)', () => {
       ['audit', 'read'],
     ]);
 
+    approverRoleId = await grantRole('[E2E] Risk Approver', [
+      ['budget', 'approve'],
+      ['budget', 'read'],
+      ['procurement', 'approve'],
+      ['procurement', 'read'],
+    ]);
+
     // Mirrors the real Procurement Officer grant in seed.ts: read + manage
     // (can trigger a re-scan) but NOT review — proving the conflict-of-
     // interest exclusion is actually enforced, not just documented.
@@ -183,7 +260,7 @@ describe('AI Risk Engine (e2e)', () => {
       ['risk', 'manage'],
     ]);
 
-    const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+    passwordHash = await argon2.hash(password, { type: argon2.argon2id });
 
     const full = await prisma.user.upsert({
       where: { email: fullEmail },
@@ -205,6 +282,26 @@ describe('AI Risk Engine (e2e)', () => {
     });
     fullUserId = full.id;
 
+    const approver = await prisma.user.upsert({
+      where: { email: approverEmail },
+      create: {
+        email: approverEmail,
+        firstName: '[E2E]',
+        lastName: 'RiskApprover',
+        passwordHash,
+        status: 'ACTIVE',
+        organizationId: orgId,
+        roles: { create: { roleId: approverRoleId } },
+      },
+      update: {
+        passwordHash,
+        status: 'ACTIVE',
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+    approverUserId = approver.id;
+
     const procOfficer = await prisma.user.upsert({
       where: { email: procOfficerEmail },
       create: {
@@ -224,6 +321,31 @@ describe('AI Risk Engine (e2e)', () => {
       },
     });
     procOfficerUserId = procOfficer.id;
+
+    const superAdminRole = await prisma.role.upsert({
+      where: { name: 'Super Administrator' },
+      create: { name: 'Super Administrator', isSystem: true },
+      update: {},
+    });
+    superAdminRoleId = superAdminRole.id;
+
+    const splitCreator = await createOrgScopedActor(
+      'e2e-risk-split-creator@test.bpfmps.local',
+      'RiskSplitCreator',
+      splitOrgId,
+      fullRoleId,
+    );
+    splitCreatorUserId = splitCreator.userId;
+    splitCreatorToken = splitCreator.token;
+
+    const splitApprover = await createOrgScopedActor(
+      'e2e-risk-split-approver@test.bpfmps.local',
+      'RiskSplitApprover',
+      splitOrgId,
+      superAdminRoleId,
+    );
+    splitApproverUserId = splitApprover.userId;
+    splitApproverToken = splitApprover.token;
 
     const noPerm = await prisma.user.upsert({
       where: { email: noPermEmail },
@@ -255,6 +377,20 @@ describe('AI Risk Engine (e2e)', () => {
       .post('/api/v1/users/me/signing-key')
       .set('Authorization', `Bearer ${fullToken}`)
       .send({ publicKeyPem: fullKeyPair.publicKeyPem })
+      .expect(201);
+
+    const approverLogin = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: approverEmail, password })
+      .expect(200);
+    approverToken = (approverLogin.body as LoginResponseBody).accessToken;
+
+    const approverKeyPair = generateEd25519KeyPair();
+    approverPrivateKeyPem = approverKeyPair.privateKeyPem;
+    await request(app.getHttpServer())
+      .post('/api/v1/users/me/signing-key')
+      .set('Authorization', `Bearer ${approverToken}`)
+      .send({ publicKeyPem: approverKeyPair.publicKeyPem })
       .expect(201);
 
     const procOfficerLogin = await request(app.getHttpServer())
@@ -307,12 +443,12 @@ describe('AI Risk Engine (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .send(
         signRequest(
           'POST',
           `/api/v1/budgets/${budgetId}/approve`,
-          fullPrivateKeyPem,
+          approverPrivateKeyPem,
         ),
       )
       .expect(200);
@@ -341,7 +477,15 @@ describe('AI Risk Engine (e2e)', () => {
   });
 
   afterAll(async () => {
-    const userIds = [fullUserId, procOfficerUserId, noPermUserId];
+    const userIds = [
+      fullUserId,
+      approverUserId,
+      procOfficerUserId,
+      noPermUserId,
+      splitCreatorUserId,
+      splitApproverUserId,
+      ...dynamicUserIds,
+    ];
     await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.userRole.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.securityEvent.deleteMany({
@@ -349,10 +493,10 @@ describe('AI Risk Engine (e2e)', () => {
     });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await prisma.rolePermission.deleteMany({
-      where: { roleId: { in: [fullRoleId, procOfficerRoleId] } },
+      where: { roleId: { in: [fullRoleId, approverRoleId, procOfficerRoleId] } },
     });
     await prisma.role.deleteMany({
-      where: { id: { in: [fullRoleId, procOfficerRoleId] } },
+      where: { id: { in: [fullRoleId, approverRoleId, procOfficerRoleId] } },
     });
     await app.close();
   });
@@ -380,7 +524,7 @@ describe('AI Risk Engine (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${requestId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .expect(200);
 
     const tender = await request(app.getHttpServer())
@@ -587,7 +731,7 @@ describe('AI Risk Engine (e2e)', () => {
     for (let i = 0; i < 2; i++) {
       const req = await request(app.getHttpServer())
         .post('/api/v1/procurement-requests')
-        .set('Authorization', `Bearer ${fullToken}`)
+        .set('Authorization', `Bearer ${splitCreatorToken}`)
         .send({
           procurementPlanId: planId,
           organizationId: splitOrgId,
@@ -599,11 +743,11 @@ describe('AI Risk Engine (e2e)', () => {
         .expect(201);
       await request(app.getHttpServer())
         .post(`/api/v1/procurement-requests/${(req.body as IdBody).id}/submit`)
-        .set('Authorization', `Bearer ${fullToken}`)
+        .set('Authorization', `Bearer ${splitCreatorToken}`)
         .expect(200);
       await request(app.getHttpServer())
         .post(`/api/v1/procurement-requests/${(req.body as IdBody).id}/approve`)
-        .set('Authorization', `Bearer ${fullToken}`)
+        .set('Authorization', `Bearer ${splitApproverToken}`)
         .expect(200);
     }
 
@@ -611,7 +755,7 @@ describe('AI Risk Engine (e2e)', () => {
     // over the 1M threshold, with every individual request still under it.
     const thirdReq = await request(app.getHttpServer())
       .post('/api/v1/procurement-requests')
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${splitCreatorToken}`)
       .send({
         procurementPlanId: planId,
         organizationId: splitOrgId,
@@ -624,11 +768,11 @@ describe('AI Risk Engine (e2e)', () => {
     const thirdId = (thirdReq.body as IdBody).id;
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${thirdId}/submit`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${splitCreatorToken}`)
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${thirdId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${splitApproverToken}`)
       .expect(200);
 
     const alerts = await request(app.getHttpServer())
@@ -649,10 +793,27 @@ describe('AI Risk Engine (e2e)', () => {
       },
     });
 
+    // Gap-audit fix (F-001): org-scoped actors for this one-off org, same
+    // reasoning as splitCreatorToken/splitApproverToken above.
+    const highSplitCreator = await createOrgScopedActor(
+      `e2e-risk-high-split-creator-${Date.now()}@test.bpfmps.local`,
+      'RiskHighSplitCreator',
+      highSplitOrg.id,
+      fullRoleId,
+    );
+    dynamicUserIds.push(highSplitCreator.userId);
+    const highSplitApprover = await createOrgScopedActor(
+      `e2e-risk-high-split-approver-${Date.now()}@test.bpfmps.local`,
+      'RiskHighSplitApprover',
+      highSplitOrg.id,
+      superAdminRoleId,
+    );
+    dynamicUserIds.push(highSplitApprover.userId);
+
     async function createAndSubmit(amount: number): Promise<string> {
       const req = await request(app.getHttpServer())
         .post('/api/v1/procurement-requests')
-        .set('Authorization', `Bearer ${fullToken}`)
+        .set('Authorization', `Bearer ${highSplitCreator.token}`)
         .send({
           procurementPlanId: planId,
           organizationId: highSplitOrg.id,
@@ -665,7 +826,7 @@ describe('AI Risk Engine (e2e)', () => {
       const id = (req.body as IdBody).id;
       await request(app.getHttpServer())
         .post(`/api/v1/procurement-requests/${id}/submit`)
-        .set('Authorization', `Bearer ${fullToken}`)
+        .set('Authorization', `Bearer ${highSplitCreator.token}`)
         .expect(200);
       return id;
     }
@@ -673,7 +834,7 @@ describe('AI Risk Engine (e2e)', () => {
     const firstId = await createAndSubmit(900_000);
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${firstId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${highSplitApprover.token}`)
       .expect(200);
 
     // Left SUBMITTED, not approved — this is the request the preventive gate
@@ -686,7 +847,7 @@ describe('AI Risk Engine (e2e)', () => {
     // severity — with every individual request still under the threshold.
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${thirdId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${highSplitApprover.token}`)
       .expect(200);
 
     const alerts = await request(app.getHttpServer())
@@ -703,7 +864,7 @@ describe('AI Risk Engine (e2e)', () => {
     // committed to it until an independent Auditor looks at it.
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${pendingId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${highSplitApprover.token}`)
       .expect(409);
 
     await request(app.getHttpServer())
@@ -718,14 +879,14 @@ describe('AI Risk Engine (e2e)', () => {
     // Unblocked now that an Auditor has resolved the flag.
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${pendingId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${highSplitApprover.token}`)
       .expect(200);
   });
 
   it('a single request already at/above the threshold is not "split procurement"', async () => {
     const req = await request(app.getHttpServer())
       .post('/api/v1/procurement-requests')
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${splitCreatorToken}`)
       .send({
         procurementPlanId: planId,
         organizationId: splitOrgId,
@@ -738,11 +899,11 @@ describe('AI Risk Engine (e2e)', () => {
     const id = (req.body as IdBody).id;
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${id}/submit`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${splitCreatorToken}`)
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${id}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${splitApproverToken}`)
       .expect(200);
 
     const alerts = await request(app.getHttpServer())

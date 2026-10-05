@@ -12,6 +12,14 @@ import type { EnvConfig } from '../../../config/env.validation';
 
 const ISSUER = 'B-PFMPS';
 const BACKUP_CODE_COUNT = 10;
+// otplib's default TOTP step — matches authenticator.allOptions().step,
+// not re-read from the library at runtime since it's a stable RFC 6238
+// default this project never overrides.
+const TOTP_STEP_SECONDS = 30;
+
+function currentTotpStep(): number {
+  return Math.floor(Date.now() / 1000 / TOTP_STEP_SECONDS);
+}
 
 @Injectable()
 export class MfaService {
@@ -109,7 +117,17 @@ export class MfaService {
         totp.secretEncrypted,
         this.config.get('MFA_ENCRYPTION_KEY', { infer: true }),
       );
-      if (authenticator.check(code, secret)) {
+      const step = currentTotpStep();
+      // Gap-audit fix: a bare authenticator.check() is stateless — the
+      // identical code remains valid for the rest of its ~30s step no
+      // matter how many times it's presented. Rejecting a step this
+      // method has already consumed closes that replay window with the
+      // same one-time-use discipline backup codes already had.
+      if (step !== totp.lastConsumedStep && authenticator.check(code, secret)) {
+        await this.prisma.mfaMethod.update({
+          where: { userId_type: { userId, type: 'TOTP' } },
+          data: { lastConsumedStep: step },
+        });
         return true;
       }
     }

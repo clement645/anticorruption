@@ -25,4 +25,9 @@
     # Still https://anticorruption-qfkv.onrender.com today because that's genuinely the only
     # origin that has ever served this API — updating this to a fake/guessed
     # production URL would be a false claim. See DEPLOYMENT.md § Backend.
-    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://anticorruption-qfkv.onrender.com"
+    # Gap-audit fix (F-007): the original policy had no font-src directive
+    # and excluded Google Fonts from style-src, so the IBM Plex typography
+    # apps/web/index.html loads from fonts.googleapis.com/fonts.gstatic.com
+    # was silently blocked in the real deployed site (never visible in
+    # local dev, which doesn't apply these headers at all).
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://anticorruption-qfkv.onrender.com"

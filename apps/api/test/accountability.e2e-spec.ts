@@ -48,10 +48,18 @@ describe('Public Accountability Scorecards (e2e)', () => {
   let prisma: PrismaService;
 
   const officerEmail = 'e2e-accountability-officer@test.bpfmps.local';
+  // Gap-audit fix (F-003): approve() now rejects self-approval. This file's
+  // whole point is that the scorecard reflects the OFFICER's own approval
+  // actions, so the officer must stay the APPROVER (not the creator) of
+  // every budget/procurement-request it approves — a separate "requester"
+  // identity creates and submits them instead.
+  const requesterEmail = 'e2e-accountability-requester@test.bpfmps.local';
   const password = 'E2ETestPassword123!';
 
   let officerUserId: string;
+  let requesterUserId: string;
   let officerToken: string;
+  let requesterToken: string;
   let orgId: string;
   let roleId: string;
   let fiscalYearId: string;
@@ -143,11 +151,37 @@ describe('Public Accountability Scorecards (e2e)', () => {
     });
     officerUserId = officer.id;
 
+    const requester = await prisma.user.upsert({
+      where: { email: requesterEmail },
+      create: {
+        email: requesterEmail,
+        firstName: '[E2E]',
+        lastName: 'AccountabilityRequester',
+        passwordHash,
+        status: 'ACTIVE',
+        organizationId: orgId,
+        roles: { create: { roleId: role.id } },
+      },
+      update: {
+        passwordHash,
+        status: 'ACTIVE',
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+    requesterUserId = requester.id;
+
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .send({ email: officerEmail, password })
       .expect(200);
     officerToken = (login.body as LoginResponseBody).accessToken;
+
+    const requesterLogin = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: requesterEmail, password })
+      .expect(200);
+    requesterToken = (requesterLogin.body as LoginResponseBody).accessToken;
 
     const fy = await request(app.getHttpServer())
       .post('/api/v1/fiscal-years')
@@ -162,7 +196,7 @@ describe('Public Accountability Scorecards (e2e)', () => {
 
     const budget = await request(app.getHttpServer())
       .post('/api/v1/budgets')
-      .set('Authorization', `Bearer ${officerToken}`)
+      .set('Authorization', `Bearer ${requesterToken}`)
       .send({
         fiscalYearId,
         organizationId: orgId,
@@ -182,7 +216,7 @@ describe('Public Accountability Scorecards (e2e)', () => {
     const budgetId = (budget.body as IdBody).id;
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/submit`)
-      .set('Authorization', `Bearer ${officerToken}`)
+      .set('Authorization', `Bearer ${requesterToken}`)
       .expect(200);
 
     // budget:approve is @RequireSignature() — enroll a key for this officer
@@ -230,13 +264,16 @@ describe('Public Accountability Scorecards (e2e)', () => {
   });
 
   afterAll(async () => {
-    await prisma.session.deleteMany({ where: { userId: officerUserId } });
+    const userIds = [officerUserId, requesterUserId];
+    await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.digitalIdentity.deleteMany({
-      where: { userId: officerUserId },
+      where: { userId: { in: userIds } },
     });
-    await prisma.userRole.deleteMany({ where: { userId: officerUserId } });
-    await prisma.securityEvent.deleteMany({ where: { userId: officerUserId } });
-    await prisma.user.delete({ where: { id: officerUserId } });
+    await prisma.userRole.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.securityEvent.deleteMany({
+      where: { userId: { in: userIds } },
+    });
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await prisma.rolePermission.deleteMany({ where: { roleId } });
     await prisma.role.deleteMany({ where: { id: roleId } });
     await app.close();
@@ -257,7 +294,7 @@ describe('Public Accountability Scorecards (e2e)', () => {
   it('reflects a real award once the officer awards a tender lot, including vendor diversity', async () => {
     const reqResponse = await request(app.getHttpServer())
       .post('/api/v1/procurement-requests')
-      .set('Authorization', `Bearer ${officerToken}`)
+      .set('Authorization', `Bearer ${requesterToken}`)
       .send({
         procurementPlanId: planId,
         organizationId: orgId,
@@ -270,7 +307,7 @@ describe('Public Accountability Scorecards (e2e)', () => {
     const requestId = (reqResponse.body as IdBody).id;
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${requestId}/submit`)
-      .set('Authorization', `Bearer ${officerToken}`)
+      .set('Authorization', `Bearer ${requesterToken}`)
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${requestId}/approve`)

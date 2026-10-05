@@ -54,16 +54,21 @@ describe('Budget (e2e)', () => {
   let prisma: PrismaService;
 
   const adminEmail = 'e2e-budget-admin@test.bpfmps.local';
+  const approverEmail = 'e2e-budget-approver@test.bpfmps.local';
   const noPermEmail = 'e2e-budget-noperm@test.bpfmps.local';
   const password = 'E2ETestPassword123!';
 
   let adminUserId: string;
+  let approverUserId: string;
   let noPermUserId: string;
   let adminToken: string;
+  let approverToken: string;
   let noPermToken: string;
   let orgId: string;
   let roleId: string;
   let adminPrivateKeyPem: string;
+  let approverPrivateKeyPem: string;
+  let outsiderUserId: string | undefined;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -146,6 +151,29 @@ describe('Budget (e2e)', () => {
     });
     adminUserId = admin.id;
 
+    // Gap-audit fix (F-003): approve() now rejects an actor approving their
+    // own budget. Every budget/adjustment in this file is created by
+    // adminToken, so approval needs a genuinely different identity.
+    const approver = await prisma.user.upsert({
+      where: { email: approverEmail },
+      create: {
+        email: approverEmail,
+        firstName: '[E2E]',
+        lastName: 'BudgetApprover',
+        passwordHash,
+        status: 'ACTIVE',
+        organizationId: orgId,
+        roles: { create: { roleId: role.id } },
+      },
+      update: {
+        passwordHash,
+        status: 'ACTIVE',
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+    approverUserId = approver.id;
+
     const noPerm = await prisma.user.upsert({
       where: { email: noPermEmail },
       create: {
@@ -170,6 +198,12 @@ describe('Budget (e2e)', () => {
       .expect(200);
     adminToken = (adminLogin.body as LoginResponseBody).accessToken;
 
+    const approverLogin = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: approverEmail, password })
+      .expect(200);
+    approverToken = (approverLogin.body as LoginResponseBody).accessToken;
+
     const noPermLogin = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .send({ email: noPermEmail, password })
@@ -185,22 +219,118 @@ describe('Budget (e2e)', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ publicKeyPem: keyPair.publicKeyPem })
       .expect(201);
+
+    const approverKeyPair = generateEd25519KeyPair();
+    approverPrivateKeyPem = approverKeyPair.privateKeyPem;
+    await request(app.getHttpServer())
+      .post('/api/v1/users/me/signing-key')
+      .set('Authorization', `Bearer ${approverToken}`)
+      .send({ publicKeyPem: approverKeyPair.publicKeyPem })
+      .expect(201);
   });
 
   afterAll(async () => {
-    await prisma.session.deleteMany({
-      where: { userId: { in: [adminUserId, noPermUserId] } },
-    });
-    await prisma.userRole.deleteMany({ where: { userId: adminUserId } });
+    const userIds = [
+      adminUserId,
+      approverUserId,
+      noPermUserId,
+      ...(outsiderUserId ? [outsiderUserId] : []),
+    ];
+    await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.userRole.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.securityEvent.deleteMany({
-      where: { userId: { in: [adminUserId, noPermUserId] } },
+      where: { userId: { in: userIds } },
     });
-    await prisma.user.deleteMany({
-      where: { id: { in: [adminUserId, noPermUserId] } },
-    });
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await prisma.rolePermission.deleteMany({ where: { roleId } });
     await prisma.role.delete({ where: { id: roleId } });
     await app.close();
+  });
+
+  // Gap-audit regression (F-001): a user from a DIFFERENT organization with
+  // full budget permissions must not be able to submit a budget belonging to
+  // this one, and the denial itself must land on the audit trail.
+  it('rejects a cross-organization budget submit and records the denial on the audit trail', async () => {
+    const outsiderOrg = await prisma.organization.upsert({
+      where: { code: 'E2E-BUDGET-OUTSIDER-ORG' },
+      create: {
+        code: 'E2E-BUDGET-OUTSIDER-ORG',
+        name: '[E2E] Budget Outsider Ministry',
+        type: 'MINISTRY',
+      },
+      update: {},
+    });
+    const outsiderEmail = 'e2e-budget-outsider@test.bpfmps.local';
+    const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+    const outsider = await prisma.user.upsert({
+      where: { email: outsiderEmail },
+      create: {
+        email: outsiderEmail,
+        firstName: '[E2E]',
+        lastName: 'BudgetOutsider',
+        passwordHash,
+        status: 'ACTIVE',
+        organizationId: outsiderOrg.id,
+        roles: { create: { roleId } },
+      },
+      update: {
+        passwordHash,
+        status: 'ACTIVE',
+        organizationId: outsiderOrg.id,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+    outsiderUserId = outsider.id;
+    const outsiderLogin = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: outsiderEmail, password })
+      .expect(200);
+    const outsiderToken = (outsiderLogin.body as LoginResponseBody).accessToken;
+
+    const fy = await request(app.getHttpServer())
+      .post('/api/v1/fiscal-years')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        name: `E2E-FY-XORG-${Date.now()}`,
+        startDate: '2027-07-01',
+        endDate: '2028-06-30',
+      })
+      .expect(201);
+    const budget = await request(app.getHttpServer())
+      .post('/api/v1/budgets')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        fiscalYearId: (fy.body as FiscalYearBody).id,
+        organizationId: orgId,
+        name: 'E2E Cross-Org Budget',
+        lines: [
+          {
+            code: 'BL01',
+            voteCode: 'V01',
+            voteName: 'Test Vote',
+            programName: 'Test Program',
+            description: 'Cross-org fixture line',
+            authorizedAmount: 1000,
+          },
+        ],
+      })
+      .expect(201);
+    const budgetId = (budget.body as BudgetBody).id;
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/budgets/${budgetId}/submit`)
+      .set('Authorization', `Bearer ${outsiderToken}`)
+      .expect(403);
+
+    const denial = await prisma.auditEvent.findFirst({
+      where: { eventType: 'AUTHORIZATION_DENIED', resourceId: budgetId },
+    });
+    expect(denial).not.toBeNull();
+    expect(denial!.actorId).toBe(outsider.id);
+    expect((denial!.payload as { reason: string }).reason).toBe(
+      'cross_organization_access',
+    );
   });
 
   it('rejects budget access without budget:read', async () => {
@@ -258,12 +388,12 @@ describe('Budget (e2e)', () => {
     // machine, not just the @RequireSignature() precondition.)
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budget.id}/approve`)
-      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .send(
         signRequest(
           'POST',
           `/api/v1/budgets/${budget.id}/approve`,
-          adminPrivateKeyPem,
+          approverPrivateKeyPem,
         ),
       )
       .expect(400);
@@ -281,12 +411,12 @@ describe('Budget (e2e)', () => {
 
     const approveResponse = await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budget.id}/approve`)
-      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .send(
         signRequest(
           'POST',
           `/api/v1/budgets/${budget.id}/approve`,
-          adminPrivateKeyPem,
+          approverPrivateKeyPem,
         ),
       )
       .expect(200);
@@ -295,12 +425,12 @@ describe('Budget (e2e)', () => {
     // Cannot approve twice.
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budget.id}/approve`)
-      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .send(
         signRequest(
           'POST',
           `/api/v1/budgets/${budget.id}/approve`,
-          adminPrivateKeyPem,
+          approverPrivateKeyPem,
         ),
       )
       .expect(400);
@@ -353,12 +483,12 @@ describe('Budget (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/approve`)
-      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .send(
         signRequest(
           'POST',
           `/api/v1/budgets/${budgetId}/approve`,
-          adminPrivateKeyPem,
+          approverPrivateKeyPem,
         ),
       )
       .expect(200);
@@ -419,7 +549,7 @@ describe('Budget (e2e)', () => {
       .post(
         `/api/v1/adjustments/${(badAdjustment.body as AdjustmentBody).id}/approve`,
       )
-      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .expect(409);
   });
 
@@ -461,12 +591,12 @@ describe('Budget (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/approve`)
-      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .send(
         signRequest(
           'POST',
           `/api/v1/budgets/${budgetId}/approve`,
-          adminPrivateKeyPem,
+          approverPrivateKeyPem,
         ),
       )
       .expect(200);

@@ -816,3 +816,11 @@ supplier; closer to 0 = repeated awards to the same supplier, worth a second loo
 `@nestjs/swagger` is wired into `main.ts` and serves interactive API documentation at
 `/api/docs` in non-production environments. It is populated automatically as DTOs and
 controllers are added in each phase — there is nothing to hand-maintain.
+
+### Authorization denials (Phase 1 roadmap)
+
+Cross-organization writes, self-escalation attempts (`PATCH /users/:id` targeting the
+caller's own roles, organization, or department), and self-approval attempts (approving or
+verifying a resource the caller created or submitted) return `403`. Each one also writes an
+`AUTHORIZATION_DENIED` audit event. Its `payload.reason` is `cross_organization_access`,
+`self_targeting_denied`, or `self_approval_denied`.

@@ -6,9 +6,13 @@ import {
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { AuditService } from '../../audit/audit.service';
 import type { CreateUserDto } from '../dto/create-user.dto';
 import { UserStatusDto, type UpdateUserDto } from '../dto/update-user.dto';
 import type { JwtPayload } from '../types/jwt-payload.type';
+
+type UpdateActor = { sub: string; email: string; organizationId: string | null };
+type RequestMeta = { ipAddress?: string; userAgent?: string };
 
 const userWithRolesInclude = {
   roles: {
@@ -24,7 +28,10 @@ const userWithRolesInclude = {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   async findByEmailWithRoles(email: string) {
     return this.prisma.user.findUnique({
@@ -99,15 +106,45 @@ export class UsersService {
    * would be surprising and this stays a single source of truth for what
    * "this user's roles" means after the call.
    */
-  async update(id: string, dto: UpdateUserDto, actorId: string) {
+  async update(
+    id: string,
+    dto: UpdateUserDto,
+    actor: UpdateActor,
+    requestMeta: RequestMeta,
+  ) {
     await this.findByIdOrThrow(id);
 
-    if (
-      id === actorId &&
-      dto.status !== undefined &&
-      dto.status !== UserStatusDto.ACTIVE
-    ) {
-      throw new ForbiddenException('You cannot change your own account status');
+    if (id === actor.sub) {
+      if (dto.status !== undefined && dto.status !== UserStatusDto.ACTIVE) {
+        await this.auditSelfTargetingDenied(actor, requestMeta, {
+          attemptedStatus: dto.status,
+        });
+        throw new ForbiddenException(
+          'You cannot change your own account status',
+        );
+      }
+      // F-002: closes a privilege-escalation path — without this, anyone
+      // holding users:update could PATCH their own user id with
+      // roleIds/organizationId/departmentId set to anything they like,
+      // including a Super Administrator role, bounded only by step-up MFA
+      // using their own already-enrolled device. Symmetric with the
+      // status self-check above, which this codebase already treated as
+      // the correct shape of guard — roleIds/organizationId/departmentId
+      // just weren't covered by it yet.
+      if (
+        dto.roleIds !== undefined ||
+        dto.organizationId !== undefined ||
+        dto.departmentId !== undefined
+      ) {
+        await this.auditSelfTargetingDenied(actor, requestMeta, {
+          attemptedRoleIds: dto.roleIds ?? null,
+          attemptedOrganizationId: dto.organizationId ?? null,
+          attemptedDepartmentId: dto.departmentId ?? null,
+        });
+        throw new ForbiddenException(
+          'You cannot change your own roles, organization, or department',
+        );
+      }
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -139,6 +176,34 @@ export class UsersService {
 
       return { ...updated, roles: updated.roles.map((ur) => ur.role) };
     });
+  }
+
+  /**
+   * Records an F-002 self-targeting rejection to the immutable audit trail
+   * — the same `AUTHORIZATION_DENIED` event type and fire-and-forget
+   * discipline `PermissionsGuard` and `assertSameOrganization` already use
+   * for their own denials, so every blocked privilege-escalation attempt
+   * is forensically visible, not just operationally prevented.
+   */
+  private async auditSelfTargetingDenied(
+    actor: UpdateActor,
+    requestMeta: RequestMeta,
+    attempted: Record<string, unknown>,
+  ): Promise<void> {
+    await this.auditService
+      .append({
+        eventType: 'AUTHORIZATION_DENIED',
+        actorId: actor.sub,
+        actorEmail: actor.email,
+        organizationId: actor.organizationId ?? undefined,
+        resourceType: 'User',
+        resourceId: actor.sub,
+        action: 'update',
+        payload: { reason: 'self_targeting_denied', ...attempted },
+        ipAddress: requestMeta.ipAddress,
+        userAgent: requestMeta.userAgent,
+      })
+      .catch(() => undefined);
   }
 
   async create(dto: CreateUserDto) {

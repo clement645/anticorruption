@@ -150,6 +150,15 @@ export const envSchema = z.object({
   NOTIFICATION_RECIPIENTS_TELEGRAM: z.string().optional().default(''),
   NOTIFICATION_RECIPIENTS_WHATSAPP: z.string().optional().default(''),
 
+  // ABAC (Phase 2): approvals whose amount exceeds this value must carry a fresh
+  // step-up MFA verification. Unset (the default) disables the rule entirely —
+  // the threshold is a deployment/policy decision, not a value this codebase
+  // chooses on an operator's behalf.
+  HIGH_VALUE_APPROVAL_THRESHOLD: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.coerce.number().positive().optional(),
+  ),
+
   // Evidence vault / object storage (Phase 10). ARCHITECTURE.md § 7 always
   // described "large documents live in encrypted object storage, only their
   // hash is anchored on-chain" — this is the first phase that actually

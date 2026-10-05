@@ -51,10 +51,19 @@ describe('Digital Signatures (e2e)', () => {
   let prisma: PrismaService;
 
   const actorEmail = 'e2e-signature-actor@test.bpfmps.local';
+  // Gap-audit fix (F-003): approve() now rejects an actor approving a
+  // budget they themselves created. This whole file is about the SIGNATURE
+  // mechanism on the approve route, not the self-approval guard, so budgets
+  // are created/submitted by a separate identity — `actorToken` (the one
+  // enrolling/rotating signing keys and signing every approve request
+  // under test) never creates what it approves.
+  const creatorEmail = 'e2e-signature-creator@test.bpfmps.local';
   const password = 'E2ETestPassword123!';
 
   let actorUserId: string;
+  let creatorUserId: string;
   let actorToken: string;
+  let creatorToken: string;
   let orgId: string;
   let roleId: string;
   let fiscalYearId: string;
@@ -137,11 +146,37 @@ describe('Digital Signatures (e2e)', () => {
     });
     actorUserId = actor.id;
 
+    const creator = await prisma.user.upsert({
+      where: { email: creatorEmail },
+      create: {
+        email: creatorEmail,
+        firstName: '[E2E]',
+        lastName: 'SignatureCreator',
+        passwordHash,
+        status: 'ACTIVE',
+        organizationId: orgId,
+        roles: { create: { roleId: role.id } },
+      },
+      update: {
+        passwordHash,
+        status: 'ACTIVE',
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+    creatorUserId = creator.id;
+
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .send({ email: actorEmail, password })
       .expect(200);
     actorToken = (login.body as LoginResponseBody).accessToken;
+
+    const creatorLogin = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: creatorEmail, password })
+      .expect(200);
+    creatorToken = (creatorLogin.body as LoginResponseBody).accessToken;
 
     const fy = await request(app.getHttpServer())
       .post('/api/v1/fiscal-years')
@@ -156,12 +191,19 @@ describe('Digital Signatures (e2e)', () => {
   });
 
   afterAll(async () => {
-    await prisma.session.deleteMany({ where: { userId: actorUserId } });
-    await prisma.signatureNonce.deleteMany({ where: { userId: actorUserId } });
-    await prisma.digitalIdentity.deleteMany({ where: { userId: actorUserId } });
-    await prisma.userRole.deleteMany({ where: { userId: actorUserId } });
-    await prisma.securityEvent.deleteMany({ where: { userId: actorUserId } });
-    await prisma.user.delete({ where: { id: actorUserId } });
+    const userIds = [actorUserId, creatorUserId];
+    await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.signatureNonce.deleteMany({
+      where: { userId: { in: userIds } },
+    });
+    await prisma.digitalIdentity.deleteMany({
+      where: { userId: { in: userIds } },
+    });
+    await prisma.userRole.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.securityEvent.deleteMany({
+      where: { userId: { in: userIds } },
+    });
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await prisma.rolePermission.deleteMany({ where: { roleId } });
     await prisma.role.delete({ where: { id: roleId } });
     await app.close();
@@ -170,7 +212,7 @@ describe('Digital Signatures (e2e)', () => {
   async function createSubmittedBudget(): Promise<string> {
     const budget = await request(app.getHttpServer())
       .post('/api/v1/budgets')
-      .set('Authorization', `Bearer ${actorToken}`)
+      .set('Authorization', `Bearer ${creatorToken}`)
       .send({
         fiscalYearId,
         organizationId: orgId,
@@ -190,7 +232,7 @@ describe('Digital Signatures (e2e)', () => {
     const budgetId = (budget.body as IdBody).id;
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/submit`)
-      .set('Authorization', `Bearer ${actorToken}`)
+      .set('Authorization', `Bearer ${creatorToken}`)
       .expect(200);
     return budgetId;
   }

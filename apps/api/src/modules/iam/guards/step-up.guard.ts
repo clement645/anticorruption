@@ -33,22 +33,28 @@ export class StepUpGuard implements CanActivate {
       REQUIRE_STEP_UP_KEY,
       [context.getHandler(), context.getClass()],
     );
-    if (!required) {
-      return true;
-    }
-
     const request = context
       .switchToHttp()
       .getRequest<
         Request & { user?: AuthenticatedUser; stepUpVerified?: boolean }
       >();
     const user = request.user;
-    if (!user) {
-      throw new ForbiddenException('Authentication required');
-    }
 
     const token = request.headers[STEP_UP_HEADER];
     const tokenString = Array.isArray(token) ? token[0] : token;
+
+    if (!required) {
+      // Optional verification: a valid token presented on an unprotected route
+      // only sets the flag for policy rules to read — it never grants access.
+      if (user && tokenString && this.stepUpService.verify(tokenString, user.sub)) {
+        request.stepUpVerified = true;
+      }
+      return true;
+    }
+
+    if (!user) {
+      throw new ForbiddenException('Authentication required');
+    }
 
     if (!tokenString || !this.stepUpService.verify(tokenString, user.sub)) {
       await this.auditService

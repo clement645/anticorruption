@@ -114,14 +114,42 @@ export class TokenService {
       },
     });
 
-    await this.prisma.session.update({
-      where: { id: session.id },
+    // F-004: the read at the top of this method is not, by itself, enough
+    // to stop a genuine concurrent replay of the same still-valid token
+    // from rotating twice — two racing calls can both observe
+    // `rotatedToId: null` before either write below lands, mint two
+    // distinct child sessions, and both successfully overwrite the same
+    // parent row (each setting its own, individually-valid `rotatedToId`
+    // — no unique-constraint conflict occurs, so the naive `update()` this
+    // replaced never caught it). The actual arbitration is this
+    // conditional `updateMany`: its WHERE clause re-checks
+    // `rotatedToId`/`revokedAt` against the row's CURRENT state at write
+    // time, not the possibly-stale state read above, and Postgres's own
+    // row-level locking guarantees only one of two concurrent such updates
+    // can ever match. The loser's `count` comes back 0 below.
+    const { count } = await this.prisma.session.updateMany({
+      where: { id: session.id, rotatedToId: null, revokedAt: null },
       data: {
         revokedAt: new Date(),
         revokedReason: 'rotated',
         rotatedToId: newSession.id,
       },
     });
+
+    if (count === 0) {
+      // Lost the race: some other call already rotated this exact token
+      // between our read above and this write. The child session just
+      // created must not be left live, and this is treated exactly like
+      // any other reuse — the whole chain is revoked as a precaution,
+      // same as the `rotatedToId`/`revokedAt` branch earlier in this
+      // method.
+      await this.prisma.session.delete({ where: { id: newSession.id } });
+      await this.revokeAllSessionsForUser(
+        session.userId,
+        'token_reuse_detected',
+      );
+      return { outcome: 'reused', userId: session.userId };
+    }
 
     return {
       outcome: 'rotated',

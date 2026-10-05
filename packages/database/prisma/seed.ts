@@ -29,6 +29,12 @@ const PERMISSIONS: Array<{
     description: "View roles and their permissions",
   },
   {
+    resource: "roles",
+    action: "manage",
+    description:
+      "Create, edit, and delete non-system roles and their permission grants (never grant a permission you don't hold)",
+  },
+  {
     resource: "organizations",
     action: "create",
     description: "Create organizations/departments",
@@ -327,13 +333,23 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   // the separation-of-duties principle the alert exists to support. They
   // can see alerts (risk:read) and trigger a re-scan (risk:manage), but
   // resolving one is reserved for independent oversight roles.
+  //
+  // Gap-audit fix (Phase 1 roadmap item): procurement:evaluate and
+  // procurement:award were REMOVED from this role. The same actor who
+  // creates a procurement request and publishes its tender must not also
+  // be the one who scores bids and awards the contract — that's a
+  // textbook self-dealing/conflict-of-interest shape, not a hypothetical
+  // one. Evaluation stays with Engineer (already independently granted,
+  // for the same reason project:inspect is Engineer-only rather than
+  // Project-Manager-only); award moves to Approving Officer below,
+  // alongside its existing budget/procurement-request/payment approval
+  // authority. Phase 3's multi-evaluator-assignment workflow builds on
+  // this baseline split — it does not replace the need for it now.
   "Procurement Officer": [
     "procurement:manage",
     "procurement:read",
     "procurement:create",
     "procurement:publish",
-    "procurement:evaluate",
-    "procurement:award",
     "supplier:read",
     "supplier:read_sensitive",
     "supplier:manage",
@@ -389,6 +405,11 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "budget:approve",
     "budget:read",
     "procurement:approve",
+    // procurement:award moved here from Procurement Officer (see comment
+    // above that role) — the award decision belongs with this role's
+    // existing independent-approval mandate, not with the role that
+    // created and published the tender being awarded.
+    "procurement:award",
     "procurement:read",
     "supplier:read",
     "supplier:read_sensitive",
@@ -423,8 +444,27 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   Whistleblower: [],
 };
 
+// Departments seeded under the ministry in every environment. Safe for
+// production: codes and names only, no people.
+const DEPARTMENTS: Array<{ code: string; name: string }> = [
+  { code: "TREASURY", name: "National Treasury" },
+  { code: "PROCUREMENT", name: "Public Procurement Directorate" },
+  { code: "ACCOUNTS", name: "Accounts and Reporting" },
+  { code: "INTERNAL_AUDIT", name: "Internal Audit" },
+  { code: "PUBLIC_WORKS", name: "Public Works" },
+  { code: "HEALTH", name: "Health Services" },
+  { code: "EDUCATION", name: "Education Services" },
+  { code: "WATER", name: "Water and Sanitation" },
+  { code: "AGRICULTURE", name: "Agriculture" },
+  { code: "LEGAL", name: "Legal Services" },
+];
+
+// Production runs set SEED_DEMO_USERS=false: roles, permissions and departments
+// are created, but no accounts are, so no default credential ever exists there.
+const seedDemoUsers = process.env.SEED_DEMO_USERS !== "false";
+
 async function main() {
-  console.log("Seeding DEMO/TEST data...");
+  console.log(seedDemoUsers ? "Seeding DEMO/TEST data..." : "Seeding roles, permissions and departments...");
 
   for (const permission of PERMISSIONS) {
     await prisma.permission.upsert({
@@ -465,23 +505,29 @@ async function main() {
     where: { code: "MOF-DEMO" },
     create: {
       code: "MOF-DEMO",
-      name: "[DEMO] Ministry of Finance",
+      name: "Ministry of Finance",
       type: "MINISTRY",
     },
-    update: {},
+    update: { name: "Ministry of Finance" },
   });
 
-  const treasuryDept = await prisma.department.upsert({
-    where: {
-      organizationId_code: { organizationId: ministry.id, code: "TREASURY" },
-    },
-    create: {
-      organizationId: ministry.id,
-      code: "TREASURY",
-      name: "[DEMO] National Treasury",
-    },
-    update: {},
-  });
+  const departmentIds = new Map<string, string>();
+  for (const dept of DEPARTMENTS) {
+    const row = await prisma.department.upsert({
+      where: {
+        organizationId_code: { organizationId: ministry.id, code: dept.code },
+      },
+      create: { organizationId: ministry.id, code: dept.code, name: dept.name },
+      update: { name: dept.name },
+    });
+    departmentIds.set(dept.code, row.id);
+  }
+  const treasuryDeptId = departmentIds.get("TREASURY")!;
+
+  if (!seedDemoUsers) {
+    console.log("Seed complete (roles, permissions and departments; no demo accounts).");
+    return;
+  }
 
   const superAdminRole = await prisma.role.findUniqueOrThrow({
     where: { name: "Super Administrator" },
@@ -501,7 +547,7 @@ async function main() {
       passwordHash: demoPasswordHash,
       status: "ACTIVE",
       organizationId: ministry.id,
-      departmentId: treasuryDept.id,
+      departmentId: treasuryDeptId,
     },
     update: {},
   });

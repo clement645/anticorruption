@@ -402,3 +402,8 @@ Neon pooled/direct connection strings were also exercised for the first time thi
 phase (see ARCHITECTURE.md § Verification Notes) — schema deployment against the
 real project is the one item left as an explicit pending human step rather than
 something this agent did unilaterally against a real cloud database.
+
+**Phase 1 (roadmap) — TOTP replay guard.** `mfa_methods.lastConsumedStep` (nullable
+integer) records the last accepted 30-second TOTP step for each method. A code whose step
+equals this value is rejected, even if it is still cryptographically valid (the same
+code cannot be used twice within its own window). The column was added by migration `20261002080226_mfa_totp_replay_guard`.

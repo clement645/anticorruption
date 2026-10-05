@@ -53,19 +53,27 @@ describe('Supplier Management (e2e)', () => {
   let prisma: PrismaService;
 
   const fullEmail = 'e2e-supplier-full@test.bpfmps.local';
+  // Gap-audit fix (F-003): approve() now rejects self-approval. The one
+  // budget/procurement-request pair created as fixture setup here is
+  // created by fullToken, so a separate approver identity does the approving.
+  const approverEmail = 'e2e-supplier-approver@test.bpfmps.local';
   const limitedEmail = 'e2e-supplier-limited@test.bpfmps.local';
   const noPermEmail = 'e2e-supplier-noperm@test.bpfmps.local';
   const password = 'E2ETestPassword123!';
 
   let fullUserId: string;
+  let approverUserId: string;
   let limitedUserId: string;
   let noPermUserId: string;
   let fullToken: string;
   let fullPrivateKeyPem: string;
+  let approverToken: string;
+  let approverPrivateKeyPem: string;
   let limitedToken: string;
   let noPermToken: string;
   let orgId: string;
   let fullRoleId: string;
+  let approverRoleId: string;
   let limitedRoleId: string;
 
   beforeAll(async () => {
@@ -148,6 +156,13 @@ describe('Supplier Management (e2e)', () => {
       ['supplier', 'read'],
     ]);
 
+    approverRoleId = await grantRole('[E2E] Supplier Approver', [
+      ['budget', 'approve'],
+      ['budget', 'read'],
+      ['procurement', 'approve'],
+      ['procurement', 'read'],
+    ]);
+
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
 
     const full = await prisma.user.upsert({
@@ -169,6 +184,26 @@ describe('Supplier Management (e2e)', () => {
       },
     });
     fullUserId = full.id;
+
+    const approver = await prisma.user.upsert({
+      where: { email: approverEmail },
+      create: {
+        email: approverEmail,
+        firstName: '[E2E]',
+        lastName: 'SupplierApprover',
+        passwordHash,
+        status: 'ACTIVE',
+        organizationId: orgId,
+        roles: { create: { roleId: approverRoleId } },
+      },
+      update: {
+        passwordHash,
+        status: 'ACTIVE',
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+    approverUserId = approver.id;
 
     const limited = await prisma.user.upsert({
       where: { email: limitedEmail },
@@ -222,6 +257,20 @@ describe('Supplier Management (e2e)', () => {
       .send({ publicKeyPem: fullKeyPair.publicKeyPem })
       .expect(201);
 
+    const approverLogin = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: approverEmail, password })
+      .expect(200);
+    approverToken = (approverLogin.body as LoginResponseBody).accessToken;
+
+    const approverKeyPair = generateEd25519KeyPair();
+    approverPrivateKeyPem = approverKeyPair.privateKeyPem;
+    await request(app.getHttpServer())
+      .post('/api/v1/users/me/signing-key')
+      .set('Authorization', `Bearer ${approverToken}`)
+      .send({ publicKeyPem: approverKeyPair.publicKeyPem })
+      .expect(201);
+
     const limitedLogin = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .send({ email: limitedEmail, password })
@@ -236,7 +285,7 @@ describe('Supplier Management (e2e)', () => {
   });
 
   afterAll(async () => {
-    const userIds = [fullUserId, limitedUserId, noPermUserId];
+    const userIds = [fullUserId, approverUserId, limitedUserId, noPermUserId];
     await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.userRole.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.securityEvent.deleteMany({
@@ -244,10 +293,10 @@ describe('Supplier Management (e2e)', () => {
     });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await prisma.rolePermission.deleteMany({
-      where: { roleId: { in: [fullRoleId, limitedRoleId] } },
+      where: { roleId: { in: [fullRoleId, approverRoleId, limitedRoleId] } },
     });
     await prisma.role.deleteMany({
-      where: { id: { in: [fullRoleId, limitedRoleId] } },
+      where: { id: { in: [fullRoleId, approverRoleId, limitedRoleId] } },
     });
     await app.close();
   });
@@ -592,12 +641,12 @@ describe('Supplier Management (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/budgets/${budgetId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .send(
         signRequest(
           'POST',
           `/api/v1/budgets/${budgetId}/approve`,
-          fullPrivateKeyPem,
+          approverPrivateKeyPem,
         ),
       )
       .expect(200);
@@ -643,7 +692,7 @@ describe('Supplier Management (e2e)', () => {
       .expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/procurement-requests/${requestId}/approve`)
-      .set('Authorization', `Bearer ${fullToken}`)
+      .set('Authorization', `Bearer ${approverToken}`)
       .expect(200);
 
     const tender = await request(app.getHttpServer())

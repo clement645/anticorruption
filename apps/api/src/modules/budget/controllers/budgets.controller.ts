@@ -95,6 +95,7 @@ export class BudgetsController {
       actor,
       meta(req),
       req.verifiedSignature,
+      (req as SignedRequest & { stepUpVerified?: boolean }).stepUpVerified === true,
     );
   }
 

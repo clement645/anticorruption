@@ -21,6 +21,7 @@ import { AuditService } from '../../audit/audit.service';
 import { BLOCKCHAIN_ADAPTER } from '../../blockchain/blockchain.constants';
 import { OBJECT_STORAGE_ADAPTER } from '../../storage/storage.constants';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { sanitizeFilenameForStorageKey } from '../../../common/storage/sanitize-filename';
 import type { EnvConfig } from '../../../config/env.validation';
 import type { SubmitReportDto } from '../dto/submit-report.dto';
 import type { AddEvidenceDto } from '../dto/add-evidence.dto';
@@ -226,7 +227,7 @@ export class WhistleblowerService {
     }
 
     const fileHash = sha256HexBuffer(content);
-    const storageKey = `whistleblower/${reportId}/${randomUUID()}-${input.fileName}`;
+    const storageKey = `whistleblower/${reportId}/${randomUUID()}-${sanitizeFilenameForStorageKey(input.fileName)}`;
     await this.storage.putObject({
       key: storageKey,
       data: content,

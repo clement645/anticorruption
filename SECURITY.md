@@ -62,6 +62,55 @@ trust.
   available via session revocation (logout-everywhere), which does take effect
   immediately since refresh requires a live, unrevoked session.
 
+## Security & Authorization Hardening (implementation roadmap Phase 1)
+
+Closes the P0/P1 findings from the post-launch gap audit. Every rejection below
+writes an `AUTHORIZATION_DENIED` event to the immutable audit trail (same event type
+`PermissionsGuard` uses for plain permission denials), fire-and-forget so a logging
+failure never weakens the deny itself.
+
+- **Cross-organization writes blocked (F-001).** `assertSameOrganization()`
+  (`apps/api/src/common/authz/organization-scope.ts`) runs before any state change on
+  budgets, allocations/commitments/expenditures/adjustments, procurement requests,
+  payments, invoices, and project evidence. The only bypass is the `Super Administrator`
+  role, matched by role name. Read visibility across organizations is deliberately
+  unchanged here — it is the ABAC question left to a later phase.
+- **Self-role/organization escalation blocked (F-002).** `PATCH /users/:id` rejects an
+  actor changing their own `roleIds`, `organizationId`, or `departmentId`, symmetric
+  with the existing own-status check.
+- **Self-approval blocked (F-003).** The actor who created or submitted a budget,
+  procurement request, budget adjustment, or invoice cannot approve or verify it.
+  `PaymentsService.castApproval()` already had this guard and is unchanged.
+- **Refresh-token rotation race closed (F-004).** Rotation is a single conditional
+  `updateMany` on the parent session (`rotatedToId IS NULL AND revokedAt IS NULL`).
+  Only one of many simultaneous refreshes of the same token can win; the rest are
+  treated as reuse and revoke the user's sessions.
+- **TOTP replay blocked.** `MfaMethod.lastConsumedStep` records the last accepted
+  30-second step; a code from an already-consumed step is rejected even though it is
+  still cryptographically valid.
+- **Path traversal in storage keys closed.** Client `fileName` is sanitized before it
+  is used in an object-storage key (evidence and whistleblower uploads). The original
+  name is kept as metadata only.
+- **Login, step-up, and public whistleblower submission rate-limited** with per-route
+  `@Throttle()` limits (login 30/min, step-up 20/min, whistleblower submission 10/10min).
+- **Procurement Officer no longer evaluates or awards.** `procurement:evaluate` and
+  `procurement:award` were removed from that role. Evaluation remains with Engineer;
+  award moved to Approving Officer. The same actor who creates and publishes a tender
+  cannot also score its bids or award it. Existing databases need the grant change
+  applied once, because the seed upserts grants and never revokes them.
+- **Google Fonts allowed through the CSP** (`style-src` for `fonts.googleapis.com`,
+  `font-src` for `fonts.gstatic.com`), so the IBM Plex typography actually loads in
+  production. `netlify.toml` headers only apply on the deployed host.
+
+Regression tests: `iam.e2e-spec.ts` (concurrent refresh, self-escalation),
+`step-up.e2e-spec.ts` (TOTP replay), `budget.e2e-spec.ts` (cross-organization submit
+with audit-trail assertion), `projects.e2e-spec.ts` (traversal sequences neutralized in
+the stored key).
+
+Shared frontend step-up challenge (`apps/web/src/lib/stepUp.ts`,
+`src/components/StepUpChallengeModal.vue`) is built but not yet wired into any view;
+Phase 5 consumes it.
+
 ## Digital Signatures (Phase 3 — audit events; post-launch — per-official business actions)
 
 Two independent signature layers exist, and it matters that they're kept distinct:
@@ -1126,3 +1175,25 @@ exemption configured there too for genuinely complete IP protection, which a
 local dev setup can't demonstrate. Nothing in this document describes a control
 that is claimed as done without it being reflected as ✅ in
 IMPLEMENTATION_PLAN.md.
+
+## Attribute-Based Access Control (Phase 2 — policy engine)
+
+Rules run after RBAC has already allowed an action, so they can only restrict. The
+engine (`apps/api/src/common/policy/`) is deny-overrides with a default of allow.
+Each denial is audited as `AUTHORIZATION_DENIED` with the rule id.
+
+- **Organization scope** (`organization-scope` rule) is the F-001 check, now expressed as
+  a policy rule. `assertSameOrganization()` delegates to it. The Super Administrator
+  bypass is unchanged.
+- **High-value approval step-up** (`high-value-approval-step-up` rule) applies when
+  `HIGH_VALUE_APPROVAL_THRESHOLD` is set. Budget and procurement-request approvals above
+  that amount need a fresh step-up token (`X-Step-Up-Token`). Approval routes accept the
+  token optionally: a valid token is recorded as `stepUpVerified`, and an invalid or absent
+  token never grants access by itself. The threshold is unset by default, so the rule is
+  off until a deployment chooses a value.
+- **Not yet implemented:** department-scoped rules. They need a department column on
+  budgets and procurement requests, which is a schema decision still pending.
+
+Configured value: `HIGH_VALUE_APPROVAL_THRESHOLD=1000000` (documented in `.env.example`).
+It must be set in the deployed API's environment. It is intentionally not set in the local
+`apps/api/.env`, because the e2e fixtures approve budgets well above 1,000,000 without step-up.

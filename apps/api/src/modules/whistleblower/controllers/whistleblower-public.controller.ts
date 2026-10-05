@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiTags } from '@nestjs/swagger';
 import { WhistleblowerService } from '../services/whistleblower.service';
 import { SubmitReportDto } from '../dto/submit-report.dto';
@@ -21,6 +22,13 @@ import { Public } from '../../iam/decorators/public.decorator';
 export class WhistleblowerPublicController {
   constructor(private readonly whistleblower: WhistleblowerService) {}
 
+  // Gap-audit hardening: this is the one public route in the system with no
+  // per-identity throttle possible by design (anonymous, no login, no
+  // account to lock out) — the global per-IP limit is all that's ever
+  // bounded a flood of fabricated reports. 10 submissions per 10 minutes is
+  // generous enough for legitimate shared-IP use (an office, a cybercafe)
+  // while still bounding a pure spam/storage-exhaustion attempt.
+  @Throttle({ default: { limit: 10, ttl: 600_000 } })
   @Post('reports')
   submit(@Body() dto: SubmitReportDto) {
     return this.whistleblower.submitReport(dto);

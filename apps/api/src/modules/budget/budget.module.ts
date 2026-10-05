@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { PolicyModule } from '../../common/policy/policy.module';
 import { FiscalYearsService } from './services/fiscal-years.service';
 import { BudgetsService } from './services/budgets.service';
 import { AllocationsService } from './services/allocations.service';
@@ -10,7 +11,7 @@ import { CommitmentsController } from './controllers/commitments.controller';
 import { AdjustmentsController } from './controllers/adjustments.controller';
 
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, PolicyModule],
   controllers: [
     FiscalYearsController,
     BudgetsController,

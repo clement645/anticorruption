@@ -2,6 +2,8 @@ import { Controller, Get, Param } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { EvidenceService } from '../services/evidence.service';
 import { RequirePermissions } from '../../iam/decorators/permissions.decorator';
+import { CurrentUser } from '../../iam/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../../iam/types/jwt-payload.type';
 
 @ApiTags('projects')
 @Controller('evidence')
@@ -22,7 +24,7 @@ export class EvidenceController {
    * for this endpoint isn't worth the inconsistency.
    */
   @Get(':id/download')
-  download(@Param('id') id: string) {
-    return this.evidenceService.download(id);
+  download(@Param('id') id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.evidenceService.download(id, actor);
   }
 }

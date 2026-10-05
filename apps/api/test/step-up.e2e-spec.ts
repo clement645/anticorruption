@@ -4,13 +4,16 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import cookieParser from 'cookie-parser';
 import * as argon2 from 'argon2';
-import { authenticator } from 'otplib';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import type { EnvConfig } from '../src/config/env.validation';
-import { enrollTotp, issueStepUpToken } from './helpers/step-up';
+import {
+  enrollTotp,
+  issueStepUpToken,
+  freshTotpCode,
+} from './helpers/step-up';
 
 interface LoginResponseBody {
   accessToken?: string;
@@ -140,15 +143,32 @@ describe('Step-up MFA (e2e)', () => {
   // spec's fixture users have been enrolled so login() can complete that
   // second step transparently.
   const totpSecrets = new Map<string, string>();
+  // Gap-audit fix: MfaService now rejects a replayed TOTP code within its
+  // own 30s step. A test that both re-logs-in (mfa/verify, one fresh code)
+  // AND issues a step-up token (a second fresh code) back to back can need
+  // to wait out a whole extra TOTP window. An access token (15min TTL)
+  // comfortably outlives this file's run, so it's cached per email and
+  // reused — login() only ever pays the mfa/verify fresh-code cost once
+  // per user, never on every call, leaving each test's own explicit
+  // step-up issuance as the one fresh-code need that's actually under
+  // test.
+  const cachedTokens = new Map<string, string>();
 
   async function login(email: string): Promise<string> {
+    const cached = cachedTokens.get(email);
+    if (cached) {
+      return cached;
+    }
+
     const res = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .send({ email, password })
       .expect(200);
     const body = res.body as LoginResponseBody;
     if (!body.mfaRequired) {
-      return body.accessToken as string;
+      const token = body.accessToken as string;
+      cachedTokens.set(email, token);
+      return token;
     }
 
     const secret = totpSecrets.get(email);
@@ -157,9 +177,11 @@ describe('Step-up MFA (e2e)', () => {
     }
     const verify = await request(app.getHttpServer())
       .post('/api/v1/auth/mfa/verify')
-      .send({ mfaToken: body.mfaToken, code: authenticator.generate(secret) })
+      .send({ mfaToken: body.mfaToken, code: await freshTotpCode(secret) })
       .expect(200);
-    return (verify.body as LoginResponseBody).accessToken as string;
+    const token = (verify.body as LoginResponseBody).accessToken as string;
+    cachedTokens.set(email, token);
+    return token;
   }
 
   it('rejects a step-up-protected update with no X-Step-Up-Token header at all', async () => {
@@ -212,7 +234,7 @@ describe('Step-up MFA (e2e)', () => {
     const stepUp = await request(app.getHttpServer())
       .post('/api/v1/auth/step-up')
       .set('Authorization', `Bearer ${token}`)
-      .send({ code: authenticator.generate(secret) })
+      .send({ code: await freshTotpCode(secret) })
       .expect(200);
     const body = stepUp.body as StepUpResponseBody;
     expect(body.stepUpToken).toBeTruthy();
@@ -271,5 +293,30 @@ describe('Step-up MFA (e2e)', () => {
       .expect(403);
 
     expect((res.body as ErrorResponseBody).message).toMatch(/step-up/i);
+  });
+
+  // Gap-audit regression: MfaService.verifyCode() must reject a TOTP code
+  // whose 30s step was already consumed for this user, even though the code
+  // is still cryptographically valid for that window. Submitting the SAME
+  // code twice within one step is the exact replay this guards against.
+  it('rejects replaying the same TOTP code within its own 30-second step', async () => {
+    const token = await login(adminAEmail);
+    const secret = totpSecrets.get(adminAEmail) as string;
+    const code = await freshTotpCode(secret);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/step-up')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ code })
+      .expect(200);
+
+    const replay = await request(app.getHttpServer())
+      .post('/api/v1/auth/step-up')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ code })
+      .expect(403);
+    expect((replay.body as ErrorResponseBody).message).toMatch(
+      /Invalid MFA code/i,
+    );
   });
 });

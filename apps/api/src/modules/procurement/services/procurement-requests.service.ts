@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -12,6 +13,8 @@ import type {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { AllocationsService } from '../../budget/services/allocations.service';
+import { assertSameOrganization } from '../../../common/authz/organization-scope';
+import { PolicyService } from '../../../common/policy/policy.service';
 import {
   SplitProcurementDetector,
   SPLIT_PROCUREMENT_CITATION,
@@ -19,7 +22,12 @@ import {
 import type { CreateRequestDto } from '../dto/create-request.dto';
 import type { ProcurementRequestView } from '../procurement.types';
 
-type Actor = { sub: string; email: string; organizationId: string | null };
+type Actor = {
+  sub: string;
+  email: string;
+  organizationId: string | null;
+  roles: string[];
+};
 type RequestMeta = { ipAddress?: string; userAgent?: string };
 
 function toView(request: ProcurementRequest): ProcurementRequestView {
@@ -55,6 +63,7 @@ export class ProcurementRequestsService {
     private readonly auditService: AuditService,
     private readonly allocationsService: AllocationsService,
     private readonly splitProcurementDetector: SplitProcurementDetector,
+    private readonly policy: PolicyService,
   ) {}
 
   async create(
@@ -62,6 +71,17 @@ export class ProcurementRequestsService {
     actor: Actor,
     requestMeta: RequestMeta,
   ): Promise<ProcurementRequestView> {
+    // Closes F-001 at the point of creation — see BudgetsService.create()'s
+    // identical judgment and comment.
+    if (
+      !actor.roles.includes('Super Administrator') &&
+      dto.organizationId !== actor.organizationId
+    ) {
+      throw new ForbiddenException(
+        'You can only create a procurement request for your own organization',
+      );
+    }
+
     const plan = await this.prisma.procurementPlan.findUnique({
       where: { id: dto.procurementPlanId },
     });
@@ -151,6 +171,18 @@ export class ProcurementRequestsService {
     requestMeta: RequestMeta,
   ): Promise<ProcurementRequestView> {
     const request = await this.getByIdOrThrow(id);
+    await assertSameOrganization(
+      actor,
+      request.organizationId,
+      'procurement request',
+      {
+        auditService: this.auditService,
+        resourceType: 'ProcurementRequest',
+        resourceId: id,
+        action: 'submit',
+        requestMeta,
+      },
+    );
     if (request.status !== 'DRAFT') {
       throw new BadRequestException(
         `Cannot submit a request in status ${request.status}`,
@@ -182,8 +214,56 @@ export class ProcurementRequestsService {
     id: string,
     actor: Actor,
     requestMeta: RequestMeta,
+    stepUpVerified = false,
   ): Promise<ProcurementRequestView> {
     const request = await this.getByIdOrThrow(id);
+    await assertSameOrganization(
+      actor,
+      request.organizationId,
+      'procurement request',
+      {
+        auditService: this.auditService,
+        resourceType: 'ProcurementRequest',
+        resourceId: id,
+        action: 'approve',
+        requestMeta,
+      },
+    );
+    // F-003: same self-approval guard as budget approval/invoice
+    // verification — the actor who requested this cannot also approve it.
+    if (request.requestedById && request.requestedById === actor.sub) {
+      await this.auditService
+        .append({
+          eventType: 'AUTHORIZATION_DENIED',
+          actorId: actor.sub,
+          actorEmail: actor.email,
+          organizationId: actor.organizationId ?? undefined,
+          resourceType: 'ProcurementRequest',
+          resourceId: id,
+          action: 'approve',
+          payload: { reason: 'self_approval_denied' },
+          ipAddress: requestMeta.ipAddress,
+          userAgent: requestMeta.userAgent,
+        })
+        .catch(() => undefined);
+      throw new ForbiddenException(
+        'You cannot approve a procurement request you created yourself',
+      );
+    }
+    await this.policy.enforce(
+      {
+        action: 'procurement:approve',
+        actor,
+        resource: {
+          organizationId: request.organizationId,
+          amount: Number(request.estimatedAmount),
+        },
+        stepUpVerified,
+      },
+      'ProcurementRequest',
+      id,
+      requestMeta,
+    );
     if (request.status !== 'SUBMITTED') {
       throw new BadRequestException(
         `Cannot approve a request in status ${request.status}`,
@@ -258,6 +338,18 @@ export class ProcurementRequestsService {
     requestMeta: RequestMeta,
   ): Promise<ProcurementRequestView> {
     const request = await this.getByIdOrThrow(id);
+    await assertSameOrganization(
+      actor,
+      request.organizationId,
+      'procurement request',
+      {
+        auditService: this.auditService,
+        resourceType: 'ProcurementRequest',
+        resourceId: id,
+        action: 'reject',
+        requestMeta,
+      },
+    );
     if (request.status !== 'SUBMITTED') {
       throw new BadRequestException(
         `Cannot reject a request in status ${request.status}`,

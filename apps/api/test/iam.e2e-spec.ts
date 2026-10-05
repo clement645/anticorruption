@@ -2,12 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import * as argon2 from 'argon2';
-import { authenticator } from 'otplib';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { enrollTotp, issueStepUpToken } from './helpers/step-up';
+import { enrollTotp, issueStepUpToken, freshTotpCode } from './helpers/step-up';
 
 interface LoginResponseBody {
   accessToken: string;
@@ -353,6 +352,31 @@ describe('IAM (e2e)', () => {
       .expect(401);
   });
 
+  // Gap-audit regression (F-004): the sequential test above passes even with
+  // the old naive rotation, so it does not exercise the race at all. This
+  // fires genuinely simultaneous rotations of the SAME still-valid token —
+  // exactly one may win; every other concurrent attempt must be rejected.
+  it('lets exactly one of many simultaneous refreshes of the same token succeed', async () => {
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: testEmailReader, password })
+      .expect(200);
+    const sharedCookie = extractRefreshCookie(login);
+
+    const attempts = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        request(app.getHttpServer())
+          .post('/api/v1/auth/refresh')
+          .set('Cookie', sharedCookie),
+      ),
+    );
+
+    const succeeded = attempts.filter((r) => r.status === 200);
+    const rejected = attempts.filter((r) => r.status === 401);
+    expect(succeeded).toHaveLength(1);
+    expect(rejected).toHaveLength(9);
+  });
+
   it('locks the account out after repeated failed logins', async () => {
     for (let i = 0; i < 5; i++) {
       await request(app.getHttpServer())
@@ -375,10 +399,41 @@ describe('IAM (e2e)', () => {
     // earlier access token would still verify (it's keyed on user id, not
     // token identity) but a new one costs nothing to generate here.
     let adminTotpSecret: string | undefined;
+    // Gap-audit fix: MfaService now rejects a replayed TOTP code within its
+    // own 30s step (closes a real replay window). A single call needing
+    // TWO fresh codes back to back (login's mfa/verify, then immediately
+    // issueStepUpToken) can need to wait out a second TOTP window, which
+    // this test previously paid on every single call since it re-logged-in
+    // and re-issued a step-up token from scratch every time. Access tokens
+    // (15min TTL) and step-up tokens (10min TTL) both comfortably outlive
+    // this whole describe block's run, so both are cached and only ever
+    // (re)computed once, lazily — never two fresh-code needs in the same
+    // call once warm.
+    let cachedToken: string | undefined;
+    let cachedStepUpToken: string | undefined;
+
+    // Split from the step-up issuance below: most tests in this block only
+    // need `token`, and the ORIGINAL version of this helper paid the
+    // enroll-then-issue-step-up cost (two fresh TOTP codes back to back,
+    // i.e. a real ~30s wait against the replay guard) unconditionally on
+    // the very first call — even for a caller that never asked for
+    // `stepUpToken` at all. That wait, incurred by a token-only test, was
+    // enough on its own to blow past this file's test timeout under load.
+    // Now that cost is only ever paid by whichever test is actually the
+    // first to need a step-up token.
     async function loginAsAdmin(): Promise<{
       token: string;
       stepUpToken: string;
     }> {
+      const stepUpToken = await getAdminStepUpToken();
+      return { token: cachedToken as string, stepUpToken };
+    }
+
+    async function getAdminToken(): Promise<string> {
+      if (cachedToken) {
+        return cachedToken;
+      }
+
       const login = await request(app.getHttpServer())
         .post('/api/v1/auth/login')
         .send({ email: testEmailAdmin, password })
@@ -398,7 +453,7 @@ describe('IAM (e2e)', () => {
           .post('/api/v1/auth/mfa/verify')
           .send({
             mfaToken: body.mfaToken,
-            code: authenticator.generate(adminTotpSecret as string),
+            code: await freshTotpCode(adminTotpSecret as string),
           })
           .expect(200);
         token = (verify.body as LoginResponseBody).accessToken;
@@ -406,6 +461,16 @@ describe('IAM (e2e)', () => {
         token = body.accessToken as string;
       }
 
+      cachedToken = token;
+      return token;
+    }
+
+    async function getAdminStepUpToken(): Promise<string> {
+      if (cachedStepUpToken) {
+        return cachedStepUpToken;
+      }
+
+      const token = await getAdminToken();
       if (!adminTotpSecret) {
         adminTotpSecret = await enrollTotp(app.getHttpServer(), token);
       }
@@ -414,7 +479,8 @@ describe('IAM (e2e)', () => {
         token,
         adminTotpSecret,
       );
-      return { token, stepUpToken };
+      cachedStepUpToken = stepUpToken;
+      return stepUpToken;
     }
 
     it('rejects user creation from an actor without users:create', async () => {
@@ -438,7 +504,7 @@ describe('IAM (e2e)', () => {
     });
 
     it('allows an admin to create a user with an assigned role', async () => {
-      const { token } = await loginAsAdmin();
+      const token = await getAdminToken();
 
       const response = await request(app.getHttpServer())
         .post('/api/v1/users')
@@ -468,7 +534,7 @@ describe('IAM (e2e)', () => {
     });
 
     it('rejects a duplicate email with 409', async () => {
-      const { token } = await loginAsAdmin();
+      const token = await getAdminToken();
 
       await request(app.getHttpServer())
         .post('/api/v1/users')
@@ -527,7 +593,7 @@ describe('IAM (e2e)', () => {
     });
 
     it('rejects an update with a missing/invalid step-up token, even with users:update', async () => {
-      const { token } = await loginAsAdmin();
+      const token = await getAdminToken();
       const targetId = createdUserIds[0];
 
       await request(app.getHttpServer())
@@ -545,6 +611,39 @@ describe('IAM (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .set('X-Step-Up-Token', stepUpToken)
         .send({ status: 'SUSPENDED' })
+        .expect(403);
+    });
+
+    // Gap-audit regression (F-002): without this guard, anyone holding
+    // users:update could PATCH their own user id with roleIds set to
+    // anything they like (e.g. a Super Administrator role), bounded only
+    // by step-up MFA using their own already-enrolled device — a genuine
+    // privilege-escalation path, not a hypothetical one.
+    it('blocks an admin from escalating their own privileges via roleIds/organizationId/departmentId', async () => {
+      const { token, stepUpToken } = await loginAsAdmin();
+
+      const roleAttempt = await request(app.getHttpServer())
+        .patch(`/api/v1/users/${adminUserId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-Step-Up-Token', stepUpToken)
+        .send({ roleIds: [targetRoleAId] })
+        .expect(403);
+      expect((roleAttempt.body as ErrorResponseBody).message).toMatch(
+        /cannot change your own roles/i,
+      );
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/users/${adminUserId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-Step-Up-Token', stepUpToken)
+        .send({ organizationId: null })
+        .expect(403);
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/users/${adminUserId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-Step-Up-Token', stepUpToken)
+        .send({ departmentId: null })
         .expect(403);
     });
 

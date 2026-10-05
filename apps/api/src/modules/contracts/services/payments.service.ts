@@ -15,6 +15,7 @@ import type {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { AllocationsService } from '../../budget/services/allocations.service';
+import { assertSameOrganization } from '../../../common/authz/organization-scope';
 import { PaymentApprovalDecisionDto } from '../dto/payment-approval.dto';
 import type { PaymentApprovalDto } from '../dto/payment-approval.dto';
 import type { RecordReconciliationDto } from '../dto/record-reconciliation.dto';
@@ -24,7 +25,12 @@ import type {
   PaymentView,
 } from '../contracts.types';
 
-type Actor = { sub: string; email: string; organizationId: string | null };
+type Actor = {
+  sub: string;
+  email: string;
+  organizationId: string | null;
+  roles: string[];
+};
 type RequestMeta = { ipAddress?: string; userAgent?: string };
 
 type PaymentRequestWithApprovals = Prisma.PaymentRequestGetPayload<{
@@ -116,6 +122,29 @@ export class PaymentsService {
     return toRequestView(await this.getRequestByIdOrThrow(id));
   }
 
+  /**
+   * `PaymentRequest`/`Payment` carry no `organizationId` column of their
+   * own — it's only reachable via Invoice → PurchaseOrder → Contract. Every
+   * mutating method below resolves it through here before touching
+   * anything, closing F-001 for this service.
+   */
+  private async getPaymentRequestOrganizationId(
+    paymentRequestId: string,
+  ): Promise<string> {
+    const pr = await this.prisma.paymentRequest.findUnique({
+      where: { id: paymentRequestId },
+      select: {
+        invoice: {
+          select: { purchaseOrder: { select: { contract: true } } },
+        },
+      },
+    });
+    if (!pr) {
+      throw new NotFoundException('Payment request not found');
+    }
+    return pr.invoice.purchaseOrder.contract.organizationId;
+  }
+
   /** Row-locks the PaymentRequest for the count-check-then-transition — a running-tally problem, same shape as Phase 5's allocation balances, not a "create once" one (see DATABASE.md § 4 Conventions). */
   private async lockPaymentRequest(
     tx: Prisma.TransactionClient,
@@ -136,6 +165,19 @@ export class PaymentsService {
     actor: Actor,
     requestMeta: RequestMeta,
   ): Promise<PaymentRequestView> {
+    await assertSameOrganization(
+      actor,
+      await this.getPaymentRequestOrganizationId(paymentRequestId),
+      'payment request',
+      {
+        auditService: this.auditService,
+        resourceType: 'PaymentRequest',
+        resourceId: paymentRequestId,
+        action: 'castApproval',
+        requestMeta,
+      },
+    );
+
     const invoiceCheck = await this.prisma.paymentRequest.findUnique({
       where: { id: paymentRequestId },
       include: { invoice: true },
@@ -144,6 +186,20 @@ export class PaymentsService {
       throw new NotFoundException('Payment request not found');
     }
     if (invoiceCheck.invoice.verifiedById === actor.sub) {
+      await this.auditService
+        .append({
+          eventType: 'AUTHORIZATION_DENIED',
+          actorId: actor.sub,
+          actorEmail: actor.email,
+          organizationId: actor.organizationId ?? undefined,
+          resourceType: 'PaymentRequest',
+          resourceId: paymentRequestId,
+          action: 'castApproval',
+          payload: { reason: 'self_approval_denied' },
+          ipAddress: requestMeta.ipAddress,
+          userAgent: requestMeta.userAgent,
+        })
+        .catch(() => undefined);
       throw new ForbiddenException(
         'Cannot approve a payment for an invoice you verified yourself',
       );
@@ -254,6 +310,18 @@ export class PaymentsService {
     if (!pr) {
       throw new NotFoundException('Payment request not found');
     }
+    await assertSameOrganization(
+      actor,
+      pr.invoice.purchaseOrder.contract.organizationId,
+      'payment request',
+      {
+        auditService: this.auditService,
+        resourceType: 'PaymentRequest',
+        resourceId: paymentRequestId,
+        action: 'execute',
+        requestMeta,
+      },
+    );
     if (pr.status !== 'APPROVED') {
       throw new BadRequestException(
         `Cannot execute a payment request in status ${pr.status} — it must be APPROVED`,
@@ -395,7 +463,19 @@ export class PaymentsService {
     actor: Actor,
     requestMeta: RequestMeta,
   ): Promise<PaymentReconciliationView> {
-    await this.getPaymentByIdOrThrow(paymentId);
+    const payment = await this.getPaymentByIdOrThrow(paymentId);
+    await assertSameOrganization(
+      actor,
+      await this.getPaymentRequestOrganizationId(payment.paymentRequestId),
+      'payment',
+      {
+        auditService: this.auditService,
+        resourceType: 'Payment',
+        resourceId: paymentId,
+        action: 'recordReconciliation',
+        requestMeta,
+      },
+    );
 
     const reconciliation = await this.prisma.paymentReconciliation.create({
       data: {
