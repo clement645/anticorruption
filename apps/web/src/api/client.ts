@@ -102,6 +102,10 @@ export function apiPost<T>(path: string, body?: unknown, headers?: Record<string
   return request<T>(path, { method: 'POST', body, headers })
 }
 
-export function apiPatch<T>(path: string, body?: unknown): Promise<T> {
-  return request<T>(path, { method: 'PATCH', body })
+export function apiPatch<T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+  return request<T>(path, { method: 'PATCH', body, headers })
+}
+
+export function apiDelete(path: string, headers?: Record<string, string>): Promise<void> {
+  return request<void>(path, { method: 'DELETE', headers })
 }

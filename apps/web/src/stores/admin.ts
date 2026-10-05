@@ -1,5 +1,25 @@
 import { defineStore } from 'pinia'
-import { apiGet, apiPatch, apiPost } from '../api/client'
+import { apiDelete, apiGet, apiPatch, apiPost } from '../api/client'
+import { requestStepUpToken } from '../lib/stepUp'
+
+export interface AdminPermission {
+  id: string
+  resource: string
+  action: string
+  description: string | null
+}
+
+export interface AdminRoleDetail extends AdminRole {
+  description: string | null
+  isSystem: boolean
+  permissions: Array<{ permission: AdminPermission }>
+}
+
+export interface RoleInput {
+  name?: string
+  description?: string
+  permissions?: string[]
+}
 
 export interface AdminRole {
   id: string
@@ -109,9 +129,44 @@ export const useAdminStore = defineStore('admin', {
     },
 
     async updateUser(id: string, input: UpdateUserInput) {
-      const updated = await apiPatch<AdminUser>(`/users/${id}`, input)
+      const stepUpToken = await requestStepUpToken()
+      const updated = await apiPatch<AdminUser>(`/users/${id}`, input, {
+        'X-Step-Up-Token': stepUpToken,
+      })
       await this.fetchUsers()
       return updated
+    },
+
+    async fetchRoleDetails() {
+      return apiGet<AdminRoleDetail[]>('/roles')
+    },
+
+    async fetchPermissions() {
+      return apiGet<AdminPermission[]>('/roles/permissions')
+    },
+
+    async createRole(input: Required<Pick<RoleInput, 'name' | 'permissions'>> & { description?: string }) {
+      const stepUpToken = await requestStepUpToken()
+      const created = await apiPost<AdminRoleDetail>('/roles', input, {
+        'X-Step-Up-Token': stepUpToken,
+      })
+      await this.fetchRoles()
+      return created
+    },
+
+    async updateRole(id: string, input: RoleInput) {
+      const stepUpToken = await requestStepUpToken()
+      const updated = await apiPatch<AdminRoleDetail>(`/roles/${id}`, input, {
+        'X-Step-Up-Token': stepUpToken,
+      })
+      await this.fetchRoles()
+      return updated
+    },
+
+    async deleteRole(id: string) {
+      const stepUpToken = await requestStepUpToken()
+      await apiDelete(`/roles/${id}`, { 'X-Step-Up-Token': stepUpToken })
+      await this.fetchRoles()
     },
   },
 })

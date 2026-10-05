@@ -28,6 +28,12 @@ export class RolesController {
     return this.rolesService.list();
   }
 
+  @Get('permissions')
+  @RequirePermissions('roles:read')
+  async listPermissions() {
+    return this.rolesService.listPermissions();
+  }
+
   @Post()
   @RequirePermissions('roles:manage')
   @RequireStepUp()

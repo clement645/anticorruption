@@ -134,6 +134,17 @@ describe('Roles management (e2e)', () => {
     await app.close();
   });
 
+  it('lists every permission to a caller with roles:read', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/roles/permissions')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .expect(200);
+    const keys = (response.body as Array<{ resource: string; action: string }>).map(
+      (p) => `${p.resource}:${p.action}`,
+    );
+    expect(keys).toEqual(expect.arrayContaining(['roles:manage', 'budget:read']));
+  });
+
   it('creates a role out of permissions the caller holds, and audits it', async () => {
     const response = await request(app.getHttpServer())
       .post('/api/v1/roles')

@@ -37,6 +37,12 @@ export class RolesService {
     });
   }
 
+  async listPermissions() {
+    return this.prisma.permission.findMany({
+      orderBy: [{ resource: 'asc' }, { action: 'asc' }],
+    });
+  }
+
   async create(dto: CreateRoleDto, actor: RoleActor, requestMeta: RequestMeta) {
     const permissionIds = await this.resolvePermissionIds(dto.permissions);
     await this.assertNoEscalation(dto.permissions, actor, requestMeta, null);

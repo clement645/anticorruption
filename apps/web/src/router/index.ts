@@ -88,6 +88,12 @@ const router = createRouter({
       meta: { requiresPermission: 'users:read' },
     },
     {
+      path: '/admin/roles',
+      name: 'admin-roles',
+      component: () => import('../views/AdminRolesView.vue'),
+      meta: { requiresPermission: 'roles:read' },
+    },
+    {
       path: '/settings/signing-key',
       name: 'signing-key',
       component: () => import('../views/SigningKeyView.vue'),

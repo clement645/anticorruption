@@ -143,7 +143,7 @@ async function submitMfa() {
         </div>
 
         <p class="mt-6 text-center text-xs text-slate-400">
-          DEMO/TEST credentials only — see IMPLEMENTATION_PLAN.md.
+          Authorised personnel only. Access is logged and monitored.
         </p>
       </div>
     </div>

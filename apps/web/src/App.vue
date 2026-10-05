@@ -19,8 +19,12 @@ import {
   ChevronDown,
   LogOut,
   KeyRound,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Shield,
 } from '@lucide/vue'
 import { useAuthStore } from './stores/auth'
+import StepUpChallengeModal from './components/StepUpChallengeModal.vue'
 
 const appName = import.meta.env.VITE_APP_NAME ?? 'B-PFMPS'
 const auth = useAuthStore()
@@ -29,6 +33,29 @@ const route = useRoute()
 
 const sidebarOpen = ref(false)
 const userMenuOpen = ref(false)
+
+const SIDEBAR_KEY = 'bpfmps.sidebarCollapsed'
+const sidebarCollapsed = ref(readSidebarPreference())
+
+function readSidebarPreference(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  try {
+    localStorage.setItem(SIDEBAR_KEY, String(sidebarCollapsed.value))
+  } catch {
+    // Storage can be unavailable (private mode); the preference then lasts for this page only.
+  }
+}
+
+// Labels hide only on desktop widths, so the mobile drawer is unaffected.
+const labelClass = computed(() => (sidebarCollapsed.value ? 'lg:hidden' : ''))
 
 interface NavItem {
   to: string
@@ -76,7 +103,10 @@ const navGroups = computed<NavGroup[]>(() => [
   },
   {
     label: 'Administration',
-    items: [{ to: '/admin/users', label: 'User Management', icon: UserCog, permission: 'users:read' }],
+    items: [
+      { to: '/admin/users', label: 'User Management', icon: UserCog, permission: 'users:read' },
+      { to: '/admin/roles', label: 'Roles & Permissions', icon: Shield, permission: 'roles:read' },
+    ],
   },
 ])
 
@@ -116,8 +146,8 @@ async function handleLogout() {
 
     <!-- Sidebar -->
     <aside
-      class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-200 bg-white transition-transform duration-200 lg:static lg:translate-x-0"
-      :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+      class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-200 bg-white transition-[transform,width] duration-200 lg:static lg:translate-x-0"
+      :class="[sidebarOpen ? 'translate-x-0' : '-translate-x-full', sidebarCollapsed ? 'lg:w-16' : 'lg:w-64']"
     >
       <div class="flex h-16 flex-none items-center gap-2.5 border-b border-slate-200 px-5">
         <div
@@ -125,7 +155,7 @@ async function handleLogout() {
         >
           B
         </div>
-        <div class="min-w-0">
+        <div class="min-w-0" :class="labelClass">
           <span class="block truncate text-sm font-semibold tracking-tight text-slate-900">{{ appName }}</span>
           <span class="block text-[10px] font-medium uppercase tracking-wider text-accent-600">Republic of Kenya</span>
         </div>
@@ -133,7 +163,10 @@ async function handleLogout() {
 
       <nav class="flex-1 overflow-y-auto px-3 py-4">
         <div v-for="group in visibleGroups" :key="group.label" class="mb-5">
-          <p class="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+          <p
+            class="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400"
+            :class="labelClass"
+          >
             {{ group.label }}
           </p>
           <router-link
@@ -146,6 +179,7 @@ async function handleLogout() {
                 ? 'bg-brand-50 text-brand-800'
                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             "
+            :title="item.label"
             @click="sidebarOpen = false"
           >
             <component
@@ -153,28 +187,41 @@ async function handleLogout() {
               class="h-[18px] w-[18px] flex-none"
               :class="isActive(item.to) ? 'text-brand-700' : 'text-slate-400'"
             />
-            <span class="truncate">{{ item.label }}</span>
+            <span class="truncate" :class="labelClass">{{ item.label }}</span>
           </router-link>
         </div>
 
         <div class="mt-2 border-t border-slate-100 pt-4">
-          <p class="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Public</p>
+          <p class="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400" :class="labelClass">Public</p>
           <router-link
             to="/transparency"
             class="mb-0.5 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
           >
             <Eye class="h-[18px] w-[18px] flex-none text-slate-400" />
-            Transparency Portal
+            <span :class="labelClass">Transparency Portal</span>
           </router-link>
           <router-link
             to="/report-a-concern"
             class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
           >
             <Megaphone class="h-[18px] w-[18px] flex-none text-slate-400" />
-            Report a Concern
+            <span :class="labelClass">Report a Concern</span>
           </router-link>
         </div>
       </nav>
+
+      <div class="hidden flex-none border-t border-slate-200 p-3 lg:block">
+        <button
+          type="button"
+          class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          :title="sidebarCollapsed ? 'Expand menu' : 'Collapse menu'"
+          @click="toggleSidebar"
+        >
+          <PanelLeftOpen v-if="sidebarCollapsed" class="h-[18px] w-[18px] flex-none text-slate-400" />
+          <PanelLeftClose v-else class="h-[18px] w-[18px] flex-none text-slate-400" />
+          <span :class="labelClass">Collapse menu</span>
+        </button>
+      </div>
     </aside>
 
     <!-- Main column -->
@@ -241,6 +288,7 @@ async function handleLogout() {
         <router-view />
       </main>
     </div>
+    <StepUpChallengeModal />
   </div>
 
   <!-- Unauthenticated / public shell -->
