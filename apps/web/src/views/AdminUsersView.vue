@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { UserPlus, X, Pencil, RefreshCw, Copy, Check, Loader2 } from '@lucide/vue'
+import { onMounted, reactive, ref } from 'vue'
+
+import { UserPlus, X, Pencil, Loader2 } from '@lucide/vue'
 import { useAuthStore } from '../stores/auth'
 import { useAdminStore, type AdminUser } from '../stores/admin'
 import { ApiError } from '../api/client'
+import UserCreateWizard from '../components/UserCreateWizard.vue'
 
 const auth = useAuthStore()
 const admin = useAdminStore()
@@ -13,17 +15,6 @@ const editOpen = ref(false)
 const editingUser = ref<AdminUser | null>(null)
 const submitting = ref(false)
 const formError = ref<string | null>(null)
-const copied = ref(false)
-
-const createForm = reactive({
-  email: '',
-  firstName: '',
-  lastName: '',
-  temporaryPassword: '',
-  organizationId: '',
-  departmentId: '',
-  roleIds: [] as string[],
-})
 
 const editForm = reactive({
   status: 'ACTIVE' as AdminUser['status'],
@@ -32,11 +23,6 @@ const editForm = reactive({
 
 onMounted(async () => {
   await Promise.all([admin.fetchUsers(), admin.fetchRoles(), admin.fetchOrganizations()])
-})
-
-const departmentsForCreate = computed(() => {
-  const org = admin.organizations.find((o) => o.id === createForm.organizationId)
-  return org?.departments ?? []
 })
 
 function statusBadgeClass(status: AdminUser['status']) {
@@ -52,36 +38,12 @@ function statusBadgeClass(status: AdminUser['status']) {
   }
 }
 
-function generatePassword() {
-  const bytes = new Uint8Array(18)
-  crypto.getRandomValues(bytes)
-  const raw = btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, '9')
-    .replace(/\//g, '8')
-    .replace(/=/g, '')
-  createForm.temporaryPassword = `Bp-${raw}!`
-}
-
-async function copyPassword() {
-  try {
-    await navigator.clipboard.writeText(createForm.temporaryPassword)
-    copied.value = true
-    setTimeout(() => (copied.value = false), 1500)
-  } catch {
-    // Clipboard access can be denied by the browser; not worth surfacing as an error.
-  }
-}
-
 function openCreate() {
-  createForm.email = ''
-  createForm.firstName = ''
-  createForm.lastName = ''
-  createForm.temporaryPassword = ''
-  createForm.organizationId = ''
-  createForm.departmentId = ''
-  createForm.roleIds = []
-  formError.value = null
   createOpen.value = true
+}
+
+function onCreated() {
+  void admin.fetchUsers()
 }
 
 function openEdit(user: AdminUser) {
@@ -90,36 +52,6 @@ function openEdit(user: AdminUser) {
   editForm.roleIds = user.roles.map((r) => r.id)
   formError.value = null
   editOpen.value = true
-}
-
-async function handleCreate() {
-  formError.value = null
-  if (createForm.roleIds.length === 0) {
-    formError.value = 'Select at least one role'
-    return
-  }
-  submitting.value = true
-  try {
-    await admin.createUser({
-      email: createForm.email,
-      firstName: createForm.firstName,
-      lastName: createForm.lastName,
-      temporaryPassword: createForm.temporaryPassword,
-      roleIds: createForm.roleIds,
-      organizationId: createForm.organizationId || undefined,
-      departmentId: createForm.departmentId || undefined,
-    })
-    createOpen.value = false
-  } catch (err) {
-    formError.value =
-      err instanceof ApiError && err.statusCode === 409
-        ? 'A user with this email already exists'
-        : err instanceof ApiError
-          ? err.message
-          : 'Unable to create user'
-  } finally {
-    submitting.value = false
-  }
 }
 
 async function handleEdit() {
@@ -212,104 +144,11 @@ function toggleRole(list: string[], roleId: string) {
       </table>
     </div>
 
-    <!-- Create user modal -->
-    <div v-if="createOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">
-      <div class="card max-h-[90vh] w-full max-w-lg overflow-y-auto p-6">
-        <div class="mb-4 flex items-center justify-between">
-          <h2 class="section-title">Create user account</h2>
-          <button type="button" class="btn btn-ghost btn-sm" @click="createOpen = false">
-            <X class="h-4 w-4" />
-          </button>
-        </div>
-
-        <form class="space-y-4" @submit.prevent="handleCreate">
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="field-label">First name</label>
-              <input v-model="createForm.firstName" required class="input mt-1" />
-            </div>
-            <div>
-              <label class="field-label">Last name</label>
-              <input v-model="createForm.lastName" required class="input mt-1" />
-            </div>
-          </div>
-
-          <div>
-            <label class="field-label">Email</label>
-            <input v-model="createForm.email" type="email" required class="input mt-1" />
-          </div>
-
-          <div>
-            <label class="field-label">Temporary password</label>
-            <div class="mt-1 flex gap-2">
-              <input v-model="createForm.temporaryPassword" required minlength="12" class="input" />
-              <button type="button" class="btn btn-secondary btn-sm flex-none" title="Generate" @click="generatePassword">
-                <RefreshCw class="h-3.5 w-3.5" />
-              </button>
-              <button
-                v-if="createForm.temporaryPassword"
-                type="button"
-                class="btn btn-secondary btn-sm flex-none"
-                title="Copy"
-                @click="copyPassword"
-              >
-                <Check v-if="copied" class="h-3.5 w-3.5 text-emerald-600" />
-                <Copy v-else class="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <p class="mt-1 text-xs text-slate-400">
-              Shared with the user out of band. They are expected to change it after first login.
-            </p>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="field-label">Organization</label>
-              <select v-model="createForm.organizationId" class="select mt-1">
-                <option value="">— None —</option>
-                <option v-for="org in admin.organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
-              </select>
-            </div>
-            <div>
-              <label class="field-label">Department</label>
-              <select v-model="createForm.departmentId" class="select mt-1" :disabled="!createForm.organizationId">
-                <option value="">— None —</option>
-                <option v-for="dep in departmentsForCreate" :key="dep.id" :value="dep.id">{{ dep.name }}</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label class="field-label">Roles</label>
-            <div class="mt-1.5 grid max-h-40 grid-cols-2 gap-1.5 overflow-y-auto rounded-lg border border-slate-200 p-3">
-              <label
-                v-for="role in admin.roles"
-                :key="role.id"
-                class="flex items-center gap-2 text-sm text-slate-700"
-              >
-                <input
-                  type="checkbox"
-                  :checked="createForm.roleIds.includes(role.id)"
-                  class="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                  @change="toggleRole(createForm.roleIds, role.id)"
-                />
-                {{ role.name }}
-              </label>
-            </div>
-          </div>
-
-          <p v-if="formError" class="alert-error">{{ formError }}</p>
-
-          <div class="flex justify-end gap-2 pt-2">
-            <button type="button" class="btn btn-secondary" @click="createOpen = false">Cancel</button>
-            <button type="submit" :disabled="submitting" class="btn btn-primary">
-              <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
-              Create user
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <UserCreateWizard
+      v-if="createOpen"
+      @close="createOpen = false"
+      @created="onCreated"
+    />
 
     <!-- Edit user modal -->
     <div v-if="editOpen && editingUser" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">
