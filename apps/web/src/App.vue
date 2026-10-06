@@ -266,6 +266,13 @@ async function handleLogout() {
               <p class="text-xs text-slate-500">{{ auth.user?.roles.join(', ') || '—' }}</p>
             </div>
             <router-link
+              to="/settings/security"
+              class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
+            >
+              <ShieldCheck class="h-4 w-4" />
+              Security
+            </router-link>
+            <router-link
               to="/settings/signing-key"
               class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
             >

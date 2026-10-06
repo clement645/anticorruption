@@ -94,6 +94,11 @@ const router = createRouter({
       meta: { requiresPermission: 'roles:read' },
     },
     {
+      path: '/settings/security',
+      name: 'security',
+      component: () => import('../views/SecurityView.vue'),
+    },
+    {
       path: '/settings/signing-key',
       name: 'signing-key',
       component: () => import('../views/SigningKeyView.vue'),

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { authenticator } from 'otplib';
 import {
@@ -30,6 +30,19 @@ export class MfaService {
 
   /** Generates a new TOTP secret and stores it encrypted, not yet enabled. */
   async beginTotpSetup(userId: string, email: string) {
+    // Re-running setup on an enabled account would flip enabled=false and replace
+    // the secret without any code check, silently switching MFA off for anyone
+    // holding a valid access token. Replacing an active authenticator needs a
+    // deliberate disable/replace flow, not this endpoint.
+    const existing = await this.prisma.mfaMethod.findUnique({
+      where: { userId_type: { userId, type: 'TOTP' } },
+    });
+    if (existing?.enabled) {
+      throw new ConflictException(
+        'An authenticator is already enabled for this account',
+      );
+    }
+
     const secret = authenticator.generateSecret();
     const encryptedSecret = encrypt(
       secret,

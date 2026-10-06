@@ -168,6 +168,11 @@ export class UsersController {
     return result;
   }
 
+  @Get('me/security')
+  async securityStatus(@CurrentUser() user: AuthenticatedUser) {
+    return { mfaEnabled: await this.mfaService.isMfaEnabled(user.sub) };
+  }
+
   @Post('me/mfa/totp/setup')
   async setupTotp(@CurrentUser() user: AuthenticatedUser) {
     return this.mfaService.beginTotpSetup(user.sub, user.email);
