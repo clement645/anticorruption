@@ -267,7 +267,7 @@ onMounted(loadStatus)
                   required
                 />
               </label>
-              <p v-if="enrollError" class="alert-error" role="alert">{{ enrollError }}</p>
+              <AlertBanner v-if="enrollError">{{ enrollError }}</AlertBanner>
               <div class="flex gap-2">
                 <button type="submit" class="btn btn-primary" :disabled="busy || code.length !== 6">
                   {{ busy ? 'Verifying…' : 'Confirm and enable' }}
@@ -287,7 +287,7 @@ onMounted(loadStatus)
           <p v-else class="text-sm text-slate-600">
             Turn on two-step sign-in. Your account will then ask for a code from your phone each time you sign in.
           </p>
-          <p v-if="enrollError" class="alert-error" role="alert">{{ enrollError }}</p>
+          <AlertBanner v-if="enrollError">{{ enrollError }}</AlertBanner>
           <button
             v-if="!mfaEnabled"
             type="button"

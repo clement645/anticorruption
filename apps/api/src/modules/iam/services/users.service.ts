@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { randomBytes } from 'node:crypto';
+import type { Prisma } from '@bpfmps/database';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import type { CreateUserDto } from '../dto/create-user.dto';
@@ -69,12 +70,32 @@ export class UsersService {
     };
   }
 
-  async list(params: { skip?: number; take?: number }) {
+  async list(params: {
+    skip?: number;
+    take?: number;
+    search?: string;
+    status?: string;
+    sortBy?: 'email' | 'status' | 'lastLoginAt' | 'createdAt';
+    sortOrder?: 'asc' | 'desc';
+  }) {
+    const where: Prisma.UserWhereInput = {
+      ...(params.status ? { status: params.status as never } : {}),
+      ...(params.search
+        ? {
+            OR: [
+              { email: { contains: params.search, mode: 'insensitive' } },
+              { firstName: { contains: params.search, mode: 'insensitive' } },
+              { lastName: { contains: params.search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
+        where,
         skip: params.skip ?? 0,
         take: params.take ?? 25,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { [params.sortBy ?? 'createdAt']: params.sortOrder ?? 'desc' },
         select: {
           id: true,
           email: true,
@@ -92,7 +113,7 @@ export class UsersService {
           mfaMethods: { where: { type: 'TOTP' }, select: { enabled: true } },
         },
       }),
-      this.prisma.user.count(),
+      this.prisma.user.count({ where }),
     ]);
     return {
       items: items.map(({ mfaMethods, roles, ...item }) => ({

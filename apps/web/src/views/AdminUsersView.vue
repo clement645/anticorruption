@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 
-import { UserPlus, X, Pencil, Loader2, KeyRound, ShieldOff, Copy, Check } from '@lucide/vue'
+import { UserPlus, X, Pencil, Loader2, KeyRound, ShieldOff, Copy, Check, Search, ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight } from '@lucide/vue'
 import { useAuthStore } from '../stores/auth'
-import { useAdminStore, type AdminUser } from '../stores/admin'
+import { useAdminStore, type AdminUser, type UserListQuery } from '../stores/admin'
 import { ApiError } from '../api/client'
 import UserCreateWizard from '../components/UserCreateWizard.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
@@ -28,8 +28,62 @@ const editForm = reactive({
   roleIds: [] as string[],
 })
 
+const PAGE_SIZE = 20
+const page = ref(0)
+const search = ref('')
+const statusFilter = ref<'' | AdminUser['status']>('')
+const sortBy = ref<NonNullable<UserListQuery['sortBy']>>('createdAt')
+const sortOrder = ref<NonNullable<UserListQuery['sortOrder']>>('desc')
+
+const totalPages = computed(() => Math.max(1, Math.ceil(admin.total / PAGE_SIZE)))
+const rangeStart = computed(() => (admin.total === 0 ? 0 : page.value * PAGE_SIZE + 1))
+const rangeEnd = computed(() => Math.min(admin.total, (page.value + 1) * PAGE_SIZE))
+
+function currentQuery(): UserListQuery {
+  return {
+    skip: page.value * PAGE_SIZE,
+    take: PAGE_SIZE,
+    search: search.value.trim() || undefined,
+    status: statusFilter.value || undefined,
+    sortBy: sortBy.value,
+    sortOrder: sortOrder.value,
+  }
+}
+
+function reload() {
+  void admin.fetchUsers(currentQuery())
+}
+
+function sortIcon(column: NonNullable<UserListQuery['sortBy']>) {
+  if (sortBy.value !== column) return ArrowUpDown
+  return sortOrder.value === 'asc' ? ArrowUp : ArrowDown
+}
+
+function toggleSort(column: NonNullable<UserListQuery['sortBy']>) {
+  if (sortBy.value === column) {
+    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortBy.value = column
+    sortOrder.value = 'asc'
+  }
+}
+
+let searchDebounce: ReturnType<typeof setTimeout> | undefined
+watch(search, () => {
+  clearTimeout(searchDebounce)
+  searchDebounce = setTimeout(() => {
+    page.value = 0
+    reload()
+  }, 300)
+})
+watch([statusFilter, sortBy, sortOrder], () => {
+  page.value = 0
+  reload()
+})
+watch(page, reload)
+
 onMounted(async () => {
-  await Promise.all([admin.fetchUsers(), admin.fetchRoles(), admin.fetchOrganizations()])
+  await Promise.all([admin.fetchUsers(currentQuery()), admin.fetchRoles(), admin.fetchOrganizations()])
 })
 
 function openCreate() {
@@ -66,7 +120,7 @@ async function confirmPending() {
     if (kind === 'password') {
       const result = await admin.resetPassword(user.id)
       resetResult.value = { email: user.email, temporaryPassword: result.temporaryPassword }
-      await admin.fetchUsers()
+      reload()
     } else {
       await admin.resetMfa(user.id)
       notify(`Authenticator removed for ${user.email}.`)
@@ -97,7 +151,7 @@ function closeResetResult() {
 }
 
 function onCreated() {
-  void admin.fetchUsers()
+  reload()
 }
 
 function openEdit(user: AdminUser) {
@@ -150,17 +204,52 @@ function toggleRole(list: string[], roleId: string) {
       </template>
     </PageHeader>
 
-    <div class="mt-6 table-shell">
+    <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <label class="relative w-full sm:max-w-xs">
+        <span class="sr-only">Search users</span>
+        <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+        <input
+          v-model="search"
+          type="search"
+          placeholder="Search by name or email"
+          class="input pl-9"
+        />
+      </label>
+      <select v-model="statusFilter" class="select w-full sm:w-48" aria-label="Filter by status">
+        <option value="">All statuses</option>
+        <option value="ACTIVE">Active</option>
+        <option value="SUSPENDED">Suspended</option>
+        <option value="LOCKED">Locked</option>
+        <option value="PENDING_ACTIVATION">Awaiting activation</option>
+      </select>
+    </div>
+
+    <div class="mt-4 hidden table-shell sm:block">
       <table class="table-base">
         <thead>
           <tr>
             <th>Name</th>
-            <th>Email</th>
+            <th>
+              <button type="button" class="inline-flex items-center gap-1 hover:text-slate-900" @click="toggleSort('email')">
+                Email
+                <component :is="sortIcon('email')" class="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </th>
             <th>Roles</th>
             <th>Organization</th>
-            <th>Status</th>
+            <th>
+              <button type="button" class="inline-flex items-center gap-1 hover:text-slate-900" @click="toggleSort('status')">
+                Status
+                <component :is="sortIcon('status')" class="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </th>
             <th>MFA</th>
-            <th>Last login</th>
+            <th>
+              <button type="button" class="inline-flex items-center gap-1 hover:text-slate-900" @click="toggleSort('lastLoginAt')">
+                Last login
+                <component :is="sortIcon('lastLoginAt')" class="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </th>
             <th v-if="canManageUsers" />
           </tr>
         </thead>
@@ -173,8 +262,12 @@ function toggleRole(list: string[], roleId: string) {
           <tr v-else-if="admin.users.length === 0">
             <td colspan="8" class="p-0">
               <EmptyState
-                title="No user accounts yet"
-                description="Accounts you create will appear here, with their roles, MFA status, and last sign-in."
+                :title="search || statusFilter ? 'No users match this filter' : 'No user accounts yet'"
+                :description="
+                  search || statusFilter
+                    ? 'Try a different search term or clear the status filter.'
+                    : 'Accounts you create will appear here, with their roles, MFA status, and last sign-in.'
+                "
               />
             </td>
           </tr>
@@ -229,6 +322,74 @@ function toggleRole(list: string[], roleId: string) {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Mobile: cards instead of a horizontally-scrolling table -->
+    <div class="mt-4 space-y-3 sm:hidden">
+      <SkeletonRows v-if="admin.loading" :rows="3" :columns="2" />
+      <EmptyState
+        v-else-if="admin.users.length === 0"
+        :title="search || statusFilter ? 'No users match this filter' : 'No user accounts yet'"
+      />
+      <div v-for="u in admin.users" v-else :key="u.id" class="card p-4">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="truncate font-medium text-slate-900">{{ u.firstName }} {{ u.lastName }}</p>
+            <p class="truncate text-sm text-slate-500">{{ u.email }}</p>
+          </div>
+          <StatusBadge :status="u.status" />
+        </div>
+        <dl class="mt-3 grid grid-cols-2 gap-y-1.5 text-xs">
+          <dt class="text-slate-400">Organization</dt>
+          <dd class="text-right text-slate-700">{{ u.organization?.name ?? '—' }}</dd>
+          <dt class="text-slate-400">MFA</dt>
+          <dd class="text-right text-slate-700">{{ u.mfaEnabled ? 'Enabled' : 'Not enabled' }}</dd>
+          <dt class="text-slate-400">Last login</dt>
+          <dd class="text-right text-slate-700">{{ u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : 'Never' }}</dd>
+        </dl>
+        <div v-if="u.roles.length > 0" class="mt-2 flex flex-wrap gap-1">
+          <span v-for="r in u.roles" :key="r.id" class="badge badge-info">{{ r.name }}</span>
+        </div>
+        <div v-if="canManageUsers" class="mt-3 flex flex-wrap gap-1.5 border-t border-slate-100 pt-3">
+          <button type="button" class="btn btn-ghost btn-sm" @click="openEdit(u)">
+            <Pencil class="h-3.5 w-3.5" />
+            Manage
+          </button>
+          <button
+            v-if="auth.hasPermission('users:reset_password') && u.id !== auth.user?.sub"
+            type="button"
+            class="btn btn-ghost btn-sm"
+            @click="askResetPassword(u)"
+          >
+            <KeyRound class="h-3.5 w-3.5" />
+            Reset password
+          </button>
+          <button
+            v-if="auth.hasPermission('users:reset_mfa') && u.id !== auth.user?.sub && u.mfaEnabled"
+            type="button"
+            class="btn btn-ghost btn-sm"
+            @click="askResetMfa(u)"
+          >
+            <ShieldOff class="h-3.5 w-3.5" />
+            Reset MFA
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pagination -->
+    <div v-if="admin.total > 0" class="mt-4 flex items-center justify-between text-sm text-slate-600">
+      <p>Showing {{ rangeStart }}–{{ rangeEnd }} of {{ admin.total }}</p>
+      <div class="flex gap-2">
+        <button type="button" class="btn btn-secondary btn-sm" :disabled="page === 0" @click="page -= 1">
+          <ChevronLeft class="h-3.5 w-3.5" />
+          Previous
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" :disabled="page >= totalPages - 1" @click="page += 1">
+          Next
+          <ChevronRight class="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
 
     <div v-if="actionError" class="mt-4">

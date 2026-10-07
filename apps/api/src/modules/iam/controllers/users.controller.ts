@@ -44,10 +44,21 @@ export class UsersController {
 
   @Get()
   @RequirePermissions('users:read')
-  async list(@Query('skip') skip?: string, @Query('take') take?: string) {
+  async list(
+    @Query('skip') skip?: string,
+    @Query('take') take?: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('sortBy') sortBy?: 'email' | 'status' | 'lastLoginAt' | 'createdAt',
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
+  ) {
     return this.usersService.list({
       skip: skip ? Number(skip) : undefined,
       take: take ? Number(take) : undefined,
+      search,
+      status,
+      sortBy,
+      sortOrder,
     });
   }
 

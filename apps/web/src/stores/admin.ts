@@ -73,9 +73,19 @@ interface UpdateUserInput {
   departmentId?: string
 }
 
+export interface UserListQuery {
+  skip?: number
+  take?: number
+  search?: string
+  status?: AdminUser['status']
+  sortBy?: 'email' | 'status' | 'lastLoginAt' | 'createdAt'
+  sortOrder?: 'asc' | 'desc'
+}
+
 interface AdminState {
   users: AdminUser[]
   total: number
+  lastQuery: UserListQuery
   roles: AdminRole[]
   organizations: AdminOrganization[]
   loading: boolean
@@ -86,21 +96,28 @@ export const useAdminStore = defineStore('admin', {
   state: (): AdminState => ({
     users: [],
     total: 0,
+    lastQuery: {},
     roles: [],
     organizations: [],
     loading: false,
     error: null,
   }),
   actions: {
-    async fetchUsers() {
+    async fetchUsers(query: UserListQuery = {}) {
       this.loading = true
       this.error = null
       try {
-        const response = await apiGet<{ items: AdminUser[]; total: number }>(
-          '/users?take=100',
-        )
+        const params = new URLSearchParams()
+        params.set('take', String(query.take ?? 25))
+        params.set('skip', String(query.skip ?? 0))
+        if (query.search) params.set('search', query.search)
+        if (query.status) params.set('status', query.status)
+        if (query.sortBy) params.set('sortBy', query.sortBy)
+        if (query.sortOrder) params.set('sortOrder', query.sortOrder)
+        const response = await apiGet<{ items: AdminUser[]; total: number }>(`/users?${params.toString()}`)
         this.users = response.items
         this.total = response.total
+        this.lastQuery = query
       } catch {
         this.error = 'Unable to load user accounts'
       } finally {
@@ -126,7 +143,7 @@ export const useAdminStore = defineStore('admin', {
 
     async createUser(input: CreateUserInput) {
       const created = await apiPost<AdminUser>('/users', input)
-      await this.fetchUsers()
+      await this.fetchUsers(this.lastQuery)
       return created
     },
 
@@ -135,7 +152,7 @@ export const useAdminStore = defineStore('admin', {
       const updated = await apiPatch<AdminUser>(`/users/${id}`, input, {
         'X-Step-Up-Token': stepUpToken,
       })
-      await this.fetchUsers()
+      await this.fetchUsers(this.lastQuery)
       return updated
     },
 
@@ -150,7 +167,7 @@ export const useAdminStore = defineStore('admin', {
     async resetMfa(id: string) {
       const stepUpToken = await requestStepUpToken()
       await apiPost<void>(`/users/${id}/mfa/reset`, undefined, { 'X-Step-Up-Token': stepUpToken })
-      await this.fetchUsers()
+      await this.fetchUsers(this.lastQuery)
     },
 
     async fetchRoleDetails() {

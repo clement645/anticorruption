@@ -322,6 +322,39 @@ describe('IAM (e2e)', () => {
       .expect(200);
   });
 
+  it('searches, filters by status, and sorts the user list', async () => {
+    const adminLogin = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: testEmailAdmin, password })
+      .expect(200);
+    const token = (adminLogin.body as LoginResponseBody).accessToken;
+
+    const bySearch = await request(app.getHttpServer())
+      .get('/api/v1/users')
+      .query({ search: 'e2e-reader', take: 50 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const searchItems = (bySearch.body as { items: Array<{ email: string }> }).items;
+    expect(searchItems.length).toBeGreaterThan(0);
+    expect(searchItems.every((u) => u.email.toLowerCase().includes('e2e-reader'))).toBe(true);
+
+    const byStatus = await request(app.getHttpServer())
+      .get('/api/v1/users')
+      .query({ status: 'SUSPENDED', take: 50 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const statusItems = (byStatus.body as { items: Array<{ status: string }> }).items;
+    expect(statusItems.every((u) => u.status === 'SUSPENDED')).toBe(true);
+
+    const sorted = await request(app.getHttpServer())
+      .get('/api/v1/users')
+      .query({ sortBy: 'email', sortOrder: 'asc', take: 50 })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const emails = (sorted.body as { items: Array<{ email: string }> }).items.map((u) => u.email);
+    expect(emails).toEqual([...emails].sort((a, b) => a.localeCompare(b)));
+  });
+
   it('rotates the refresh token and detects reuse of a rotated-out token', async () => {
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
