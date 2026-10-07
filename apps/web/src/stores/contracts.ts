@@ -63,6 +63,7 @@ export interface PaymentRequest {
   requiredApprovals: number
   status: string
   approvals: PaymentApproval[]
+  createdAt: string
 }
 
 export interface Payment {
@@ -80,7 +81,9 @@ interface ContractsState {
   purchaseOrders: PurchaseOrder[]
   invoices: Invoice[]
   paymentRequests: PaymentRequest[]
+  paymentRequestsLoading: boolean
   payments: Payment[]
+  paymentsLoading: boolean
   error: string | null
 }
 
@@ -90,7 +93,9 @@ export const useContractsStore = defineStore('contracts', {
     purchaseOrders: [],
     invoices: [],
     paymentRequests: [],
+    paymentRequestsLoading: false,
     payments: [],
+    paymentsLoading: false,
     error: null,
   }),
   actions: {
@@ -163,7 +168,14 @@ export const useContractsStore = defineStore('contracts', {
     },
 
     async fetchPaymentRequests() {
-      this.paymentRequests = await apiGet<PaymentRequest[]>('/payment-requests')
+      this.paymentRequestsLoading = true
+      try {
+        this.paymentRequests = await apiGet<PaymentRequest[]>('/payment-requests')
+      } catch {
+        this.error = 'Unable to load payment requests'
+      } finally {
+        this.paymentRequestsLoading = false
+      }
     },
     async castApproval(id: string, decision: 'APPROVE' | 'REJECT', notes?: string) {
       try {
@@ -197,10 +209,21 @@ export const useContractsStore = defineStore('contracts', {
     },
 
     async fetchPayments() {
-      this.payments = await apiGet<Payment[]>('/payments')
+      this.paymentsLoading = true
+      try {
+        this.payments = await apiGet<Payment[]>('/payments')
+      } catch {
+        this.error = 'Unable to load executed payments'
+      } finally {
+        this.paymentsLoading = false
+      }
     },
     async recordReconciliation(paymentId: string, externalReference: string, status: 'MATCHED' | 'DISCREPANCY', notes?: string) {
-      await apiPost(`/payments/${paymentId}/reconciliations`, { externalReference, status, notes })
+      try {
+        await apiPost(`/payments/${paymentId}/reconciliations`, { externalReference, status, notes })
+      } catch {
+        this.error = 'Unable to record reconciliation'
+      }
     },
   },
 })

@@ -13,6 +13,8 @@ import { money } from '../lib/money'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import AlertBanner from '../components/ui/AlertBanner.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import SkeletonRows from '../components/ui/SkeletonRows.vue'
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
 import { notify } from '../components/ui/toast'
 
@@ -252,8 +254,12 @@ function reconcileFormFor(paymentId: string) {
 
 async function handleReconcile(paymentId: string) {
   const form = reconcileFormFor(paymentId)
+  store.error = null
   await store.recordReconciliation(paymentId, form.externalReference, form.status)
-  delete reconcileForm[paymentId]
+  if (!store.error) {
+    notify('Reconciliation recorded.')
+    delete reconcileForm[paymentId]
+  }
 }
 
 function activePOs() {
@@ -261,6 +267,22 @@ function activePOs() {
 }
 function activeContracts() {
   return store.contracts.filter((c) => c.status === 'ACTIVE')
+}
+
+/** The approver who already voted on this request, if the current user is one. */
+function myApproval(pr: PaymentRequest) {
+  return pr.approvals.find((a) => a.approvedById === auth.user?.sub) ?? null
+}
+
+/**
+ * The backend refuses an approval from whoever verified the underlying
+ * invoice (no one self-certifies a payment they already vouched for) — the
+ * form is hidden here too rather than letting the user submit into a
+ * guaranteed 403.
+ */
+function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
+  const invoice = store.invoices.find((i) => i.id === pr.invoiceId)
+  return !!invoice && invoice.verifiedById === auth.user?.sub
 }
 </script>
 
@@ -418,29 +440,50 @@ function activeContracts() {
 
     <!-- Payment Requests -->
     <div class="mt-6 card p-6">
-      <h2 class="section-title">Payment Requests</h2>
+      <h2 class="section-title">Payment requests</h2>
       <p class="mt-1 text-[11px] text-slate-400">
-        Multi-signature approval — {{ store.paymentRequests[0]?.requiredApprovals ?? 2 }} distinct approvers required before execution.
+        Multi-signature approval — each request needs decisions from distinct approvers, none of whom verified the invoice themselves.
       </p>
-      <EmptyState v-if="store.paymentRequests.length === 0" title="No payment requests yet" />
+
+      <SkeletonRows v-if="store.paymentRequestsLoading" :rows="2" :columns="2" class="mt-3" />
+      <EmptyState v-else-if="store.paymentRequests.length === 0" class="mt-3" title="No payment requests yet" />
+
       <div v-for="pr in store.paymentRequests" :key="pr.id" class="mt-3 rounded-lg border border-slate-100 p-3 text-xs">
-        <div class="flex items-center justify-between">
-          <span class="num font-medium">{{ money(pr.amount) }}</span>
+        <div class="flex items-center justify-between gap-2">
+          <span class="num text-sm font-semibold text-slate-900">{{ money(pr.amount) }}</span>
           <StatusBadge :status="pr.status" />
-          <span class="text-slate-400">{{ pr.approvals.length }}/{{ pr.requiredApprovals }} approvals</span>
         </div>
-        <ul class="mt-1 text-slate-500">
-          <li v-for="a in pr.approvals" :key="a.id">{{ a.decision }} — {{ a.approvedById.slice(0, 8) }}…</li>
+        <div class="mt-1 flex items-center justify-between text-slate-400">
+          <span>Requested {{ new Date(pr.createdAt).toLocaleDateString() }}</span>
+          <span>{{ pr.approvals.length }}/{{ pr.requiredApprovals }} approvals</span>
+        </div>
+
+        <ul v-if="pr.approvals.length" class="mt-2 space-y-1">
+          <li v-for="a in pr.approvals" :key="a.id" class="flex items-center gap-2 text-slate-500">
+            <StatusBadge :status="a.decision" />
+            <span>{{ a.approvedById === auth.user?.sub ? 'You' : `${a.approvedById.slice(0, 8)}…` }}</span>
+            <span class="text-slate-400">— {{ new Date(a.createdAt).toLocaleDateString() }}</span>
+            <span v-if="a.notes" class="text-slate-400">“{{ a.notes }}”</span>
+          </li>
         </ul>
-        <div v-if="pr.status === 'PENDING' && canApprovePayment" class="mt-2 flex items-center gap-1">
-          <input v-model="notesByRequest[pr.id]" placeholder="Notes" class="input w-40 px-1.5 py-1 text-xs" />
-          <button class="btn btn-secondary btn-sm text-emerald-700" @click="askApprovePayment(pr)">
-            Approve
-          </button>
-          <button class="btn btn-secondary btn-sm text-red-700" @click="askRejectPayment(pr)">
-            Reject
-          </button>
-        </div>
+
+        <template v-if="pr.status === 'PENDING' && canApprovePayment">
+          <p v-if="myApproval(pr)" class="mt-2 text-slate-400">
+            You already recorded your decision on this request.
+          </p>
+          <p v-else-if="verifiedInvoiceMyself(pr)" class="mt-2 text-slate-400">
+            You verified this invoice — a different approver must decide on its payment.
+          </p>
+          <div v-else class="mt-2 flex items-center gap-1">
+            <input v-model="notesByRequest[pr.id]" placeholder="Notes" class="input w-40 px-1.5 py-1 text-xs" />
+            <button class="btn btn-secondary btn-sm text-emerald-700" @click="askApprovePayment(pr)">
+              Approve
+            </button>
+            <button class="btn btn-secondary btn-sm text-red-700" @click="askRejectPayment(pr)">
+              Reject
+            </button>
+          </div>
+        </template>
         <button
           v-if="pr.status === 'APPROVED' && canExecutePayment"
           class="btn btn-primary btn-sm mt-2"
@@ -452,26 +495,29 @@ function activeContracts() {
     </div>
 
     <!-- Payments -->
-    <div class="mt-6 card p-6">
-      <h2 class="section-title">Executed Payments</h2>
-      <table class="mt-2 w-full text-xs">
+    <div class="mt-6 table-shell">
+      <h2 class="section-title px-4 pt-4">Executed payments</h2>
+      <table class="table-base">
         <thead>
-          <tr class="text-left text-slate-500">
-            <th class="pr-2">Reference</th>
-            <th class="pr-2">Amount</th>
-            <th class="pr-2">Executed</th>
-            <th></th>
+          <tr>
+            <th>Reference</th>
+            <th>Amount</th>
+            <th>Executed</th>
+            <th>Reconciliation</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-if="store.payments.length === 0">
+          <tr v-if="store.paymentsLoading">
+            <td colspan="4" class="p-0"><SkeletonRows :rows="2" :columns="4" /></td>
+          </tr>
+          <tr v-else-if="store.payments.length === 0">
             <td colspan="4" class="p-0"><EmptyState title="No payments executed yet" /></td>
           </tr>
-          <tr v-for="p in store.payments" :key="p.id" class="border-t border-slate-100">
-            <td class="py-1 pr-2 font-mono">{{ p.reference }}</td>
-            <td class="num py-1 pr-2">{{ money(p.amount) }}</td>
-            <td class="py-1 pr-2 text-slate-500">{{ new Date(p.executedAt).toLocaleString() }}</td>
-            <td class="py-1">
+          <tr v-for="p in store.payments" :key="p.id">
+            <td class="font-mono text-slate-500">{{ p.reference }}</td>
+            <td class="num font-medium text-slate-900">{{ money(p.amount) }}</td>
+            <td class="text-slate-500">{{ new Date(p.executedAt).toLocaleString() }}</td>
+            <td>
               <div v-if="canReconcile" class="flex items-center gap-1">
                 <input v-model="reconcileFormFor(p.id).externalReference" placeholder="Bank ref" class="input w-28 px-1.5 py-1 text-xs" />
                 <select v-model="reconcileFormFor(p.id).status" class="select w-auto px-1.5 py-1 text-xs">

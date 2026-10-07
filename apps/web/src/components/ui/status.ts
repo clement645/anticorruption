@@ -38,6 +38,10 @@ const STATUSES: Record<string, StatusDefinition> = {
   PASSED: { label: 'Passed', tone: 'success' },
   FAILED: { label: 'Failed', tone: 'danger' },
   NEEDS_REVISION: { label: 'Needs revision', tone: 'warning' },
+  // A payment approval's own decision — distinct from the PaymentRequest
+  // status (APPROVED/REJECTED above): this labels one approver's vote.
+  APPROVE: { label: 'Approved', tone: 'success' },
+  REJECT: { label: 'Rejected', tone: 'danger' },
   LOW: { label: 'Low', tone: 'success' },
   MEDIUM: { label: 'Medium', tone: 'warning' },
   HIGH: { label: 'High', tone: 'danger' },

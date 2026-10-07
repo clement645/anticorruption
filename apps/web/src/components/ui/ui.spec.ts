@@ -31,6 +31,11 @@ describe('status registry', () => {
     expect(statusFor('FAILED').tone).toBe('danger')
     expect(statusFor('NEEDS_REVISION').tone).toBe('warning')
   })
+
+  it('distinguishes a payment approval decision from the payment request status it feeds into', () => {
+    expect(statusFor('APPROVE')).toEqual({ label: 'Approved', tone: 'success' })
+    expect(statusFor('REJECT')).toEqual({ label: 'Rejected', tone: 'danger' })
+  })
 })
 
 describe('StatusBadge', () => {
