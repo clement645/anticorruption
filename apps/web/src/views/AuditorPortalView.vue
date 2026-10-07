@@ -72,7 +72,7 @@ function formatEventType(eventType: string): string {
           {{ audit.reconstructing ? 'Reconstructing…' : 'Reconstruct' }}
         </button>
       </form>
-      <p class="mt-2 text-[11px] text-slate-400">
+      <p class="mt-2 text-[11px] text-slate-500">
         `resourceType`/`resourceId` are plain identifiers recorded on every audit event — not a
         foreign key into any one table — so any tracked resource in the system can be looked up
         here regardless of which module it belongs to.
@@ -114,7 +114,7 @@ function formatEventType(eventType: string): string {
         >
           <div class="flex items-center justify-between">
             <span class="font-medium text-slate-900">{{ formatEventType(entry.event.eventType) }}</span>
-            <span class="text-slate-400">{{ new Date(entry.event.createdAt).toLocaleString() }}</span>
+            <span class="text-slate-500">{{ new Date(entry.event.createdAt).toLocaleString() }}</span>
           </div>
           <p class="mt-1 text-slate-500">
             Sequence {{ entry.event.sequence }} · actor {{ entry.event.actorEmail ?? '—' }}
@@ -133,7 +133,7 @@ function formatEventType(eventType: string): string {
             <span :class="entry.checks.signatureValid ? 'text-emerald-700' : 'text-red-700'">
               {{ entry.checks.signatureValid ? '✓' : '✗' }} signature
             </span>
-            <span :class="entry.blockchainAnchor.anchored ? 'text-emerald-700' : 'text-slate-400'">
+            <span :class="entry.blockchainAnchor.anchored ? 'text-emerald-700' : 'text-slate-500'">
               {{ entry.blockchainAnchor.anchored ? '✓' : '—' }} blockchain anchor
             </span>
           </div>

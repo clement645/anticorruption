@@ -111,7 +111,7 @@ async function handleLogout() {
     >
       <Search class="h-4 w-4" aria-hidden="true" />
       <span class="w-40 text-left">Go to a page</span>
-      <kbd class="rounded border border-slate-200 bg-white px-1.5 text-[11px] text-slate-400">Ctrl K</kbd>
+      <kbd class="rounded border border-slate-200 bg-white px-1.5 text-[11px] text-slate-500">Ctrl K</kbd>
     </button>
 
     <router-link
@@ -147,7 +147,7 @@ async function handleLogout() {
           <span class="block max-w-[12rem] truncate text-sm font-medium text-slate-900">{{ auth.user?.email }}</span>
           <span class="block text-xs text-slate-500">{{ primaryRole }}</span>
         </span>
-        <ChevronDown class="hidden h-4 w-4 text-slate-400 sm:block" aria-hidden="true" />
+        <ChevronDown class="hidden h-4 w-4 text-slate-500 sm:block" aria-hidden="true" />
       </button>
 
       <div
@@ -167,7 +167,7 @@ async function handleLogout() {
           class="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
           @click="userMenuOpen = false"
         >
-          <component :is="item.icon" class="h-4 w-4 text-slate-400" aria-hidden="true" />
+          <component :is="item.icon" class="h-4 w-4 text-slate-500" aria-hidden="true" />
           {{ item.label }}
         </router-link>
         <button
@@ -176,7 +176,7 @@ async function handleLogout() {
           class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
           @click="handleLogout"
         >
-          <LogOut class="h-4 w-4 text-slate-400" aria-hidden="true" />
+          <LogOut class="h-4 w-4 text-slate-500" aria-hidden="true" />
           Sign out
         </button>
       </div>

@@ -63,7 +63,7 @@ function statusColor(status: string): string {
     </div>
 
     <section class="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-      <nav class="flex flex-wrap gap-1 border-b border-slate-200 text-sm">
+      <nav class="flex flex-wrap gap-1 border-b border-slate-200 text-sm" aria-label="Transparency portal sections">
         <button
           v-for="tab in (['projects', 'tenders', 'suppliers', 'budgets', 'verify'] as Tab[])"
           :key="tab"
@@ -120,7 +120,7 @@ function statusColor(status: string): string {
             {{ e.fileName }} — <span class="font-mono">{{ e.fileHash.slice(0, 16) }}…</span>
             <span v-if="e.anchored" class="text-emerald-700">(anchored)</span>
           </li>
-          <li v-if="store.projectDetail.evidence.length === 0" class="text-xs text-slate-400">No evidence published yet.</li>
+          <li v-if="store.projectDetail.evidence.length === 0" class="text-xs text-slate-500">No evidence published yet.</li>
         </ul>
       </div>
     </div>
@@ -131,7 +131,7 @@ function statusColor(status: string): string {
         <input v-model="tenderSearch" placeholder="Search tenders by title" class="input w-72" />
         <button type="submit" class="btn btn-primary btn-sm">Search</button>
       </form>
-      <p class="mt-1 text-[11px] text-slate-400">Only published tenders appear here — drafts are internal.</p>
+      <p class="mt-1 text-[11px] text-slate-500">Only published tenders appear here — drafts are internal.</p>
 
       <ul class="mt-4 divide-y divide-slate-100 card">
         <li v-for="t in store.tenders" :key="t.id" class="p-3 text-sm">
@@ -154,7 +154,7 @@ function statusColor(status: string): string {
             <div v-if="lot.award" class="mt-0.5 text-emerald-700">
               Awarded to {{ lot.award.supplierName }} for {{ lot.award.awardedAmount }}
             </div>
-            <div v-else class="mt-0.5 text-slate-400">Not yet awarded</div>
+            <div v-else class="mt-0.5 text-slate-500">Not yet awarded</div>
           </li>
         </ul>
       </div>

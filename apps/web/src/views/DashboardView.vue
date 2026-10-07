@@ -283,7 +283,7 @@ const anySectionVisible = computed(
             <span class="text-sm text-slate-800">{{ item.label }}</span>
             <span class="flex items-center gap-3">
               <StatusBadge v-if="item.count > 0" :status="item.tone === 'danger' ? 'HIGH' : 'PENDING'" :label="String(item.count)" />
-              <span v-else class="text-xs text-slate-400">None</span>
+              <span v-else class="text-xs text-slate-500">None</span>
               <span class="text-xs text-brand-700">Open</span>
             </span>
           </RouterLink>
@@ -293,7 +293,7 @@ const anySectionVisible = computed(
 
     <div class="grid gap-6 lg:grid-cols-2">
       <!-- Project status -->
-      <section v-if="auth.hasPermission('project:read')" class="card p-5" aria-labelledby="projects-heading">
+      <section v-if="auth.hasPermission('project:read')" class="card min-w-0 p-5" aria-labelledby="projects-heading">
         <h3 id="projects-heading" class="text-sm font-semibold text-slate-800">Project status</h3>
         <AlertBanner v-if="sections.projects.state === 'error'" class="mt-3">
           We couldn’t load projects. Your data has not been changed.
@@ -312,7 +312,7 @@ const anySectionVisible = computed(
       </section>
 
       <!-- Risk overview -->
-      <section v-if="auth.hasPermission('risk:read')" class="card p-5" aria-labelledby="risk-heading">
+      <section v-if="auth.hasPermission('risk:read')" class="card min-w-0 p-5" aria-labelledby="risk-heading">
         <h3 id="risk-heading" class="text-sm font-semibold text-slate-800">Open risk alerts</h3>
         <AlertBanner v-if="sections.risks.state === 'error'" class="mt-3">
           We couldn’t load risk alerts. Your data has not been changed.
@@ -330,7 +330,7 @@ const anySectionVisible = computed(
       </section>
 
       <!-- Procurement -->
-      <section v-if="auth.hasPermission('procurement:read')" class="card p-5" aria-labelledby="proc-heading">
+      <section v-if="auth.hasPermission('procurement:read')" class="card min-w-0 p-5" aria-labelledby="proc-heading">
         <h3 id="proc-heading" class="text-sm font-semibold text-slate-800">Requests awaiting approval</h3>
         <AlertBanner v-if="sections.procurement.state === 'error'" class="mt-3">
           We couldn’t load procurement requests. Your data has not been changed.
@@ -346,7 +346,7 @@ const anySectionVisible = computed(
       </section>
 
       <!-- Recent activity -->
-      <section v-if="auth.hasPermission('audit:read')" class="card p-5" aria-labelledby="activity-heading">
+      <section v-if="auth.hasPermission('audit:read')" class="card min-w-0 p-5" aria-labelledby="activity-heading">
         <h3 id="activity-heading" class="text-sm font-semibold text-slate-800">Recent activity</h3>
         <AlertBanner v-if="sections.activity.state === 'error'" class="mt-3">
           We couldn’t load recent activity. Your data has not been changed.

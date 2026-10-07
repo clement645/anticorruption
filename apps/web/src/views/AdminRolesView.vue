@@ -220,7 +220,7 @@ onMounted(load)
                   {{ role.permissions.length }} permission{{ role.permissions.length === 1 ? '' : 's' }}
                 </span>
               </span>
-              <Lock v-if="role.isSystem" class="mt-1 h-4 w-4 flex-none text-slate-400" aria-label="System role" />
+              <Lock v-if="role.isSystem" class="mt-1 h-4 w-4 flex-none text-slate-500" aria-label="System role" />
             </button>
           </li>
         </ul>
@@ -258,7 +258,7 @@ onMounted(load)
                   v-for="p in group"
                   :key="keyOf(p)"
                   class="flex items-center gap-2 text-sm"
-                  :class="canGrant(p) ? 'text-slate-700' : 'text-slate-400'"
+                  :class="canGrant(p) ? 'text-slate-700' : 'text-slate-500'"
                   :title="canGrant(p) ? p.description ?? '' : 'You do not hold this permission, so you cannot grant it'"
                 >
                   <input
@@ -324,7 +324,7 @@ onMounted(load)
               :key="key"
               class="badge badge-info font-mono"
             >{{ key }}</span>
-            <span v-if="selectedRole.permissions.length === 0" class="text-sm text-slate-400">No permissions</span>
+            <span v-if="selectedRole.permissions.length === 0" class="text-sm text-slate-500">No permissions</span>
           </div>
           <AlertBanner v-if="formError">{{ formError }}</AlertBanner>
         </div>

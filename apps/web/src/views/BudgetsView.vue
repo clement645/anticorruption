@@ -170,11 +170,11 @@ async function handleCommit(allocationId: string) {
         </div>
         <div>
           <label class="field-label">Start</label>
-          <input v-model="newFiscalYear.startDate" type="date" required class="input mt-1" />
+          <input v-model="newFiscalYear.startDate" type="date" required aria-label="Start date" class="input mt-1" />
         </div>
         <div>
           <label class="field-label">End</label>
-          <input v-model="newFiscalYear.endDate" type="date" required class="input mt-1" />
+          <input v-model="newFiscalYear.endDate" type="date" required aria-label="End date" class="input mt-1" />
         </div>
         <button type="submit" class="btn btn-primary btn-sm">Add fiscal year</button>
       </form>
@@ -185,52 +185,61 @@ async function handleCommit(allocationId: string) {
       <h2 class="section-title">New Budget</h2>
       <form class="mt-3 space-y-3" @submit.prevent="handleCreateBudget">
         <div class="flex flex-wrap gap-2">
-          <select v-model="newBudget.fiscalYearId" required class="select w-auto">
+          <select v-model="newBudget.fiscalYearId" required aria-label="Fiscal year" class="select w-auto max-w-full">
             <option value="" disabled>Fiscal year</option>
             <option v-for="fy in budget.fiscalYears" :key="fy.id" :value="fy.id">{{ fy.name }}</option>
           </select>
-          <select v-model="newBudget.organizationId" required class="select w-auto">
+          <select v-model="newBudget.organizationId" required aria-label="Organization" class="select w-auto max-w-full">
             <option value="" disabled>Organization</option>
             <option v-for="org in organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
           </select>
           <input v-model="newBudget.name" required placeholder="Budget name" class="input flex-1" />
         </div>
 
-        <table class="w-full text-xs">
-          <thead>
-            <tr class="text-left text-slate-500">
-              <th class="pr-2">Code</th>
-              <th class="pr-2">Vote code</th>
-              <th class="pr-2">Vote name</th>
-              <th class="pr-2">Program</th>
-              <th class="pr-2">Description</th>
-              <th class="pr-2">Amount</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(line, i) in newBudget.lines" :key="i">
-              <td class="pr-2 py-1"><input v-model="line.code" required class="input w-20 px-1.5 py-1 text-xs" /></td>
-              <td class="pr-2 py-1"><input v-model="line.voteCode" required class="input w-16 px-1.5 py-1 text-xs" /></td>
-              <td class="pr-2 py-1"><input v-model="line.voteName" required class="input w-24 px-1.5 py-1 text-xs" /></td>
-              <td class="pr-2 py-1"><input v-model="line.programName" required class="input w-24 px-1.5 py-1 text-xs" /></td>
-              <td class="pr-2 py-1"><input v-model="line.description" required class="input w-32 px-1.5 py-1 text-xs" /></td>
-              <td class="pr-2 py-1">
-                <input v-model.number="line.authorizedAmount" type="number" min="1" required class="input w-24 px-1.5 py-1 text-xs" />
-              </td>
-              <td class="py-1">
-                <button
-                  v-if="newBudget.lines.length > 1"
-                  type="button"
-                  class="btn btn-ghost btn-sm text-red-600"
-                  @click="removeLine(i)"
-                >
-                  &times;
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[640px] text-xs">
+            <thead>
+              <tr class="text-left text-slate-500">
+                <th class="pr-2">Code</th>
+                <th class="pr-2">Vote code</th>
+                <th class="pr-2">Vote name</th>
+                <th class="pr-2">Program</th>
+                <th class="pr-2">Description</th>
+                <th class="pr-2">Amount</th>
+                <th><span class="sr-only">Remove line</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(line, i) in newBudget.lines" :key="i">
+                <td class="pr-2 py-1"><input v-model="line.code" required aria-label="Code" class="input w-20 px-1.5 py-1 text-xs" /></td>
+                <td class="pr-2 py-1"><input v-model="line.voteCode" required aria-label="Vote code" class="input w-16 px-1.5 py-1 text-xs" /></td>
+                <td class="pr-2 py-1"><input v-model="line.voteName" required aria-label="Vote name" class="input w-24 px-1.5 py-1 text-xs" /></td>
+                <td class="pr-2 py-1"><input v-model="line.programName" required aria-label="Program" class="input w-24 px-1.5 py-1 text-xs" /></td>
+                <td class="pr-2 py-1"><input v-model="line.description" required aria-label="Description" class="input w-32 px-1.5 py-1 text-xs" /></td>
+                <td class="pr-2 py-1">
+                  <input
+                    v-model.number="line.authorizedAmount"
+                    type="number"
+                    min="1"
+                    required
+                    aria-label="Amount"
+                    class="input w-24 px-1.5 py-1 text-xs"
+                  />
+                </td>
+                <td class="py-1">
+                  <button
+                    v-if="newBudget.lines.length > 1"
+                    type="button"
+                    class="btn btn-ghost btn-sm text-red-600"
+                    @click="removeLine(i)"
+                  >
+                    &times;
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <button type="button" class="btn btn-ghost btn-sm" @click="addLine">+ Add line</button>
 
         <div>

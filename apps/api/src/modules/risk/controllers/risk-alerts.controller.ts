@@ -34,6 +34,8 @@ export class RiskAlertsController {
     @Query('detectorType') detectorType?: string,
     @Query('resourceType') resourceType?: string,
     @Query('resourceId') resourceId?: string,
+    @Query('skip') skip?: string,
+    @Query('take') take?: string,
   ) {
     return this.riskAlertsService.list({
       status,
@@ -41,6 +43,8 @@ export class RiskAlertsController {
       detectorType,
       resourceType,
       resourceId,
+      skip: skip ? Number(skip) : undefined,
+      take: take ? Number(take) : undefined,
     });
   }
 

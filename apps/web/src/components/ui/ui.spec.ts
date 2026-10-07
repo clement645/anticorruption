@@ -36,6 +36,12 @@ describe('status registry', () => {
     expect(statusFor('APPROVE')).toEqual({ label: 'Approved', tone: 'success' })
     expect(statusFor('REJECT')).toEqual({ label: 'Rejected', tone: 'danger' })
   })
+
+  it('maps the risk-alert review statuses', () => {
+    expect(statusFor('OPEN').tone).toBe('warning')
+    expect(statusFor('CONFIRMED').tone).toBe('danger')
+    expect(statusFor('DISMISSED').tone).toBe('neutral')
+  })
 })
 
 describe('StatusBadge', () => {

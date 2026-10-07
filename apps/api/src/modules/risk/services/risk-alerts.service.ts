@@ -140,26 +140,42 @@ export class RiskAlertsService {
     return { total, bySeverity };
   }
 
+  /**
+   * Paginated — this table is written by background detectors, not people,
+   * so it has no natural upper bound the way a hand-entered list does. An
+   * earlier unbounded version of this query was found, during Phase 10 QA,
+   * to return every row in the table (thousands, tens of MB) on first paint
+   * of the Risk Alerts screen; `summary()` above already existed for the
+   * dashboard's counts, but the list itself had never been capped.
+   */
   async list(params: {
     status?: string;
     severity?: string;
     detectorType?: string;
     resourceType?: string;
     resourceId?: string;
-  }): Promise<RiskAlertView[]> {
-    const alerts = await this.prisma.riskAlert.findMany({
-      where: {
-        ...(params.status ? { status: params.status as never } : {}),
-        ...(params.severity ? { severity: params.severity as never } : {}),
-        ...(params.detectorType
-          ? { detectorType: params.detectorType as never }
-          : {}),
-        ...(params.resourceType ? { resourceType: params.resourceType } : {}),
-        ...(params.resourceId ? { resourceId: params.resourceId } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    return alerts.map(toView);
+    skip?: number;
+    take?: number;
+  }): Promise<{ items: RiskAlertView[]; total: number }> {
+    const where: Prisma.RiskAlertWhereInput = {
+      ...(params.status ? { status: params.status as never } : {}),
+      ...(params.severity ? { severity: params.severity as never } : {}),
+      ...(params.detectorType
+        ? { detectorType: params.detectorType as never }
+        : {}),
+      ...(params.resourceType ? { resourceType: params.resourceType } : {}),
+      ...(params.resourceId ? { resourceId: params.resourceId } : {}),
+    };
+    const [alerts, total] = await this.prisma.$transaction([
+      this.prisma.riskAlert.findMany({
+        where,
+        skip: params.skip ?? 0,
+        take: Math.min(params.take ?? 25, 100),
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.riskAlert.count({ where }),
+    ]);
+    return { items: alerts.map(toView), total };
   }
 
   async getByIdOrThrow(id: string): Promise<RiskAlert> {

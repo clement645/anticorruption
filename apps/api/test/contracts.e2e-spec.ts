@@ -875,7 +875,10 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .query({ detectorType: 'DUPLICATE_PAYMENT', resourceId: secondInvoiceId })
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
-    const alertList = alerts.body as Array<{ id: string; severity: string }>;
+    // GET /risk-alerts is paginated — unwrap the page.
+    const alertList = (
+      alerts.body as { items: Array<{ id: string; severity: string }> }
+    ).items;
     expect(alertList.length).toBeGreaterThanOrEqual(1);
     expect(alertList[0].severity).toBe('HIGH');
   });

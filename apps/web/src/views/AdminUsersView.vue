@@ -207,7 +207,7 @@ function toggleRole(list: string[], roleId: string) {
     <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <label class="relative w-full sm:max-w-xs">
         <span class="sr-only">Search users</span>
-        <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+        <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" aria-hidden="true" />
         <input
           v-model="search"
           type="search"
@@ -250,7 +250,7 @@ function toggleRole(list: string[], roleId: string) {
                 <component :is="sortIcon('lastLoginAt')" class="h-3.5 w-3.5" aria-hidden="true" />
               </button>
             </th>
-            <th v-if="canManageUsers" />
+            <th v-if="canManageUsers"><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -277,7 +277,7 @@ function toggleRole(list: string[], roleId: string) {
             <td>
               <div class="flex flex-wrap gap-1">
                 <span v-for="r in u.roles" :key="r.id" class="badge badge-info">{{ r.name }}</span>
-                <span v-if="u.roles.length === 0" class="text-xs text-slate-400">none</span>
+                <span v-if="u.roles.length === 0" class="text-xs text-slate-500">none</span>
               </div>
             </td>
             <td class="text-slate-500">{{ u.organization?.name ?? '—' }}</td>
@@ -340,11 +340,11 @@ function toggleRole(list: string[], roleId: string) {
           <StatusBadge :status="u.status" />
         </div>
         <dl class="mt-3 grid grid-cols-2 gap-y-1.5 text-xs">
-          <dt class="text-slate-400">Organization</dt>
+          <dt class="text-slate-500">Organization</dt>
           <dd class="text-right text-slate-700">{{ u.organization?.name ?? '—' }}</dd>
-          <dt class="text-slate-400">MFA</dt>
+          <dt class="text-slate-500">MFA</dt>
           <dd class="text-right text-slate-700">{{ u.mfaEnabled ? 'Enabled' : 'Not enabled' }}</dd>
-          <dt class="text-slate-400">Last login</dt>
+          <dt class="text-slate-500">Last login</dt>
           <dd class="text-right text-slate-700">{{ u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : 'Never' }}</dd>
         </dl>
         <div v-if="u.roles.length > 0" class="mt-2 flex flex-wrap gap-1">
@@ -460,6 +460,7 @@ function toggleRole(list: string[], roleId: string) {
             <label class="field-label">Status</label>
             <select
               v-model="editForm.status"
+              aria-label="Status"
               class="select mt-1"
               :disabled="auth.user?.sub === editingUser.id"
             >
@@ -468,7 +469,7 @@ function toggleRole(list: string[], roleId: string) {
               <option value="LOCKED">Locked</option>
               <option value="PENDING_ACTIVATION">Pending activation</option>
             </select>
-            <p v-if="auth.user?.sub === editingUser.id" class="mt-1 text-xs text-slate-400">
+            <p v-if="auth.user?.sub === editingUser.id" class="mt-1 text-xs text-slate-500">
               You cannot change your own account status.
             </p>
           </div>

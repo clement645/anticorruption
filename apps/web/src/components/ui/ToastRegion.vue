@@ -16,7 +16,7 @@ import { dismiss, toasts } from './toast'
       <CircleAlert v-else-if="t.tone === 'error'" class="mt-0.5 h-4 w-4 flex-none text-danger" aria-hidden="true" />
       <Info v-else class="mt-0.5 h-4 w-4 flex-none text-info" aria-hidden="true" />
       <p class="flex-1 text-slate-800">{{ t.message }}</p>
-      <button type="button" class="rounded p-0.5 text-slate-400 hover:text-slate-700" aria-label="Dismiss" @click="dismiss(t.id)">
+      <button type="button" class="rounded p-0.5 text-slate-500 hover:text-slate-700" aria-label="Dismiss" @click="dismiss(t.id)">
         <X class="h-3.5 w-3.5" aria-hidden="true" />
       </button>
     </div>

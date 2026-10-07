@@ -78,7 +78,7 @@ function onKeydown(event: KeyboardEvent) {
       class="w-full max-w-lg overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card-lg"
     >
       <div class="flex items-center gap-3 border-b border-slate-200 px-4">
-        <Search class="h-4 w-4 flex-none text-slate-400" aria-hidden="true" />
+        <Search class="h-4 w-4 flex-none text-slate-500" aria-hidden="true" />
         <input
           ref="input"
           v-model="query"
@@ -112,9 +112,9 @@ function onKeydown(event: KeyboardEvent) {
           @mouseenter="active = i"
           @click="choose(item)"
         >
-          <component :is="item.icon" class="h-4 w-4 flex-none text-slate-400" aria-hidden="true" />
+          <component :is="item.icon" class="h-4 w-4 flex-none text-slate-500" aria-hidden="true" />
           <span class="flex-1">{{ item.label }}</span>
-          <span class="text-xs text-slate-400">{{ item.to }}</span>
+          <span class="text-xs text-slate-500">{{ item.to }}</span>
         </li>
       </ul>
     </div>

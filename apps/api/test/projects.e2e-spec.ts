@@ -55,6 +55,10 @@ interface RiskAlertBody {
   resourceType: string;
   resourceId: string;
 }
+/** GET /risk-alerts is paginated — this unwraps the page. */
+function riskAlertItems(res: { body: unknown }): RiskAlertBody[] {
+  return (res.body as { items: RiskAlertBody[] }).items;
+}
 interface EvidenceDownloadBody {
   fileName: string;
   mimeType: string;
@@ -945,7 +949,7 @@ describe('Project Verification (e2e)', () => {
       .query({ resourceType: 'ProjectEvidence', resourceId: evidence.id })
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
-    expect((alerts.body as RiskAlertBody[]).length).toBe(0);
+    expect(riskAlertItems(alerts).length).toBe(0);
   });
 
   it('raises an EVIDENCE_LOCATION_MISMATCH alert (never blocking the upload) when evidence GPS is far from the declared site', async () => {
@@ -978,7 +982,7 @@ describe('Project Verification (e2e)', () => {
       .query({ resourceType: 'ProjectEvidence', resourceId: evidence.id })
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
-    const alertList = alerts.body as RiskAlertBody[];
+    const alertList = riskAlertItems(alerts);
     expect(alertList).toHaveLength(1);
     expect(alertList[0].detectorType).toBe('EVIDENCE_LOCATION_MISMATCH');
     expect(alertList[0].severity).toBe('HIGH');

@@ -53,7 +53,7 @@ const showShell = computed(() => auth.isAuthenticated)
           </div>
           <span class="text-base font-semibold tracking-tight text-slate-900">{{ appName }}</span>
         </router-link>
-        <nav class="flex items-center gap-5 text-sm">
+        <nav class="flex items-center gap-5 text-sm" aria-label="Public site">
           <router-link to="/transparency" class="text-slate-600 hover:text-slate-900">Transparency Portal</router-link>
           <router-link to="/report-a-concern" class="text-slate-600 hover:text-slate-900">Report a Concern</router-link>
           <router-link v-if="route.path !== '/login'" to="/login" class="btn btn-primary btn-sm">Sign in</router-link>

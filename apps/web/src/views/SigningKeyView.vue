@@ -76,7 +76,7 @@ async function handleEnroll() {
         </div>
 
         <div v-else class="flex items-start gap-3">
-          <KeyRound class="mt-0.5 h-5 w-5 flex-none text-slate-400" />
+          <KeyRound class="mt-0.5 h-5 w-5 flex-none text-slate-500" />
           <div>
             <p class="text-sm font-medium text-slate-900">No signing key enrolled yet</p>
             <p class="mt-1 text-xs text-slate-500">
@@ -122,7 +122,7 @@ async function handleEnroll() {
       </template>
     </div>
 
-    <div class="mt-4 flex items-start gap-2 text-xs text-slate-400">
+    <div class="mt-4 flex items-start gap-2 text-xs text-slate-500">
       <ShieldCheck class="mt-0.5 h-4 w-4 flex-none" />
       <p>
         The private half of this key is generated in your browser and never sent anywhere —

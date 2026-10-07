@@ -295,6 +295,7 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
     <!-- Contracts -->
     <div class="mt-6 card p-6">
       <h2 class="section-title">Contracts</h2>
+      <div class="overflow-x-auto">
       <table class="mt-2 w-full text-xs">
         <thead>
           <tr class="text-left text-slate-500">
@@ -302,7 +303,7 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
             <th class="pr-2">Title</th>
             <th class="pr-2">Value</th>
             <th class="pr-2">Status</th>
-            <th></th>
+            <th><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -333,16 +334,17 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
           </tr>
         </tbody>
       </table>
+      </div>
       <form v-if="canManageContracts" class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleCreateContract">
         <input v-model="contractForm.awardId" required placeholder="Award ID" class="input w-64" />
         <input v-model="contractForm.contractNumber" required placeholder="Contract number" class="input" />
         <input v-model="contractForm.title" required placeholder="Title" class="input" />
         <input v-model.number="contractForm.value" type="number" min="1" required placeholder="Value" class="input w-28" />
-        <input v-model="contractForm.startDate" type="date" required class="input" />
-        <input v-model="contractForm.endDate" type="date" required class="input" />
+        <input v-model="contractForm.startDate" type="date" required aria-label="Start date" class="input" />
+        <input v-model="contractForm.endDate" type="date" required aria-label="End date" class="input" />
         <button type="submit" class="btn btn-primary btn-sm">Create contract</button>
       </form>
-      <p class="mt-1 text-[11px] text-slate-400">
+      <p class="mt-1 text-[11px] text-slate-500">
         Budget line, supplier, and organization are derived server-side from the award — not entered here.
       </p>
     </div>
@@ -350,6 +352,7 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
     <!-- Purchase Orders -->
     <div class="mt-6 card p-6">
       <h2 class="section-title">Purchase Orders</h2>
+      <div class="overflow-x-auto">
       <table class="mt-2 w-full text-xs">
         <thead>
           <tr class="text-left text-slate-500">
@@ -357,7 +360,7 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
             <th class="pr-2">Description</th>
             <th class="pr-2">Amount</th>
             <th class="pr-2">Status</th>
-            <th></th>
+            <th><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -381,8 +384,9 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
           </tr>
         </tbody>
       </table>
+      </div>
       <form v-if="canManageContracts" class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleCreatePO">
-        <select v-model="poForm.contractId" required class="select w-auto">
+        <select v-model="poForm.contractId" required aria-label="Active contract" class="select w-auto max-w-full">
           <option value="" disabled>Active contract</option>
           <option v-for="c in activeContracts()" :key="c.id" :value="c.id">{{ c.contractNumber }}</option>
         </select>
@@ -396,13 +400,14 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
     <!-- Invoices -->
     <div class="mt-6 card p-6">
       <h2 class="section-title">Invoices</h2>
+      <div class="overflow-x-auto">
       <table class="mt-2 w-full text-xs">
         <thead>
           <tr class="text-left text-slate-500">
             <th class="pr-2">Invoice #</th>
             <th class="pr-2">Amount</th>
             <th class="pr-2">Status</th>
-            <th></th>
+            <th><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -425,8 +430,9 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
           </tr>
         </tbody>
       </table>
+      </div>
       <form v-if="canSubmitInvoice" class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleCreateInvoice">
-        <select v-model="invoiceForm.purchaseOrderId" required class="select w-auto">
+        <select v-model="invoiceForm.purchaseOrderId" required aria-label="Issued PO" class="select w-auto max-w-full">
           <option value="" disabled>Issued PO</option>
           <option v-for="po in activePOs()" :key="po.id" :value="po.id">{{ po.poNumber }}</option>
         </select>
@@ -441,7 +447,7 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
     <!-- Payment Requests -->
     <div class="mt-6 card p-6">
       <h2 class="section-title">Payment requests</h2>
-      <p class="mt-1 text-[11px] text-slate-400">
+      <p class="mt-1 text-[11px] text-slate-500">
         Multi-signature approval — each request needs decisions from distinct approvers, none of whom verified the invoice themselves.
       </p>
 
@@ -453,7 +459,7 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
           <span class="num text-sm font-semibold text-slate-900">{{ money(pr.amount) }}</span>
           <StatusBadge :status="pr.status" />
         </div>
-        <div class="mt-1 flex items-center justify-between text-slate-400">
+        <div class="mt-1 flex items-center justify-between text-slate-500">
           <span>Requested {{ new Date(pr.createdAt).toLocaleDateString() }}</span>
           <span>{{ pr.approvals.length }}/{{ pr.requiredApprovals }} approvals</span>
         </div>
@@ -462,16 +468,16 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
           <li v-for="a in pr.approvals" :key="a.id" class="flex items-center gap-2 text-slate-500">
             <StatusBadge :status="a.decision" />
             <span>{{ a.approvedById === auth.user?.sub ? 'You' : `${a.approvedById.slice(0, 8)}…` }}</span>
-            <span class="text-slate-400">— {{ new Date(a.createdAt).toLocaleDateString() }}</span>
-            <span v-if="a.notes" class="text-slate-400">“{{ a.notes }}”</span>
+            <span class="text-slate-500">— {{ new Date(a.createdAt).toLocaleDateString() }}</span>
+            <span v-if="a.notes" class="text-slate-500">“{{ a.notes }}”</span>
           </li>
         </ul>
 
         <template v-if="pr.status === 'PENDING' && canApprovePayment">
-          <p v-if="myApproval(pr)" class="mt-2 text-slate-400">
+          <p v-if="myApproval(pr)" class="mt-2 text-slate-500">
             You already recorded your decision on this request.
           </p>
-          <p v-else-if="verifiedInvoiceMyself(pr)" class="mt-2 text-slate-400">
+          <p v-else-if="verifiedInvoiceMyself(pr)" class="mt-2 text-slate-500">
             You verified this invoice — a different approver must decide on its payment.
           </p>
           <div v-else class="mt-2 flex items-center gap-1">
@@ -519,8 +525,13 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
             <td class="text-slate-500">{{ new Date(p.executedAt).toLocaleString() }}</td>
             <td>
               <div v-if="canReconcile" class="flex items-center gap-1">
-                <input v-model="reconcileFormFor(p.id).externalReference" placeholder="Bank ref" class="input w-28 px-1.5 py-1 text-xs" />
-                <select v-model="reconcileFormFor(p.id).status" class="select w-auto px-1.5 py-1 text-xs">
+                <input
+                  v-model="reconcileFormFor(p.id).externalReference"
+                  placeholder="Bank ref"
+                  aria-label="Bank reference"
+                  class="input w-28 px-1.5 py-1 text-xs"
+                />
+                <select v-model="reconcileFormFor(p.id).status" aria-label="Reconciliation status" class="select w-auto px-1.5 py-1 text-xs">
                   <option value="MATCHED">Matched</option>
                   <option value="DISCREPANCY">Discrepancy</option>
                 </select>

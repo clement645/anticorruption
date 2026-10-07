@@ -48,7 +48,7 @@ function closeDrawer() {
     <nav class="flex-1 overflow-y-auto px-2.5 py-4" aria-label="Main navigation">
       <div v-for="group in visibleGroups" :key="group.label" class="mb-5">
         <p
-          class="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400"
+          class="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500"
           :class="labelClass"
         >
           {{ group.label }}
@@ -70,7 +70,7 @@ function closeDrawer() {
           <component
             :is="item.icon"
             class="h-[18px] w-[18px] flex-none"
-            :class="isActive(item) ? 'text-brand-700' : 'text-slate-400'"
+            :class="isActive(item) ? 'text-brand-700' : 'text-slate-500'"
             aria-hidden="true"
           />
           <span class="truncate" :class="labelClass">{{ item.label }}</span>
@@ -78,7 +78,7 @@ function closeDrawer() {
       </div>
 
       <div class="mt-2 border-t border-slate-100 pt-4">
-        <p class="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400" :class="labelClass">
+        <p class="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500" :class="labelClass">
           Public
         </p>
         <router-link
@@ -87,7 +87,7 @@ function closeDrawer() {
           :title="'Transparency portal'"
           @click="closeDrawer"
         >
-          <Eye class="h-[18px] w-[18px] flex-none text-slate-400" aria-hidden="true" />
+          <Eye class="h-[18px] w-[18px] flex-none text-slate-500" aria-hidden="true" />
           <span class="truncate" :class="labelClass">Transparency portal</span>
         </router-link>
         <router-link
@@ -96,7 +96,7 @@ function closeDrawer() {
           :title="'Report a concern'"
           @click="closeDrawer"
         >
-          <Megaphone class="h-[18px] w-[18px] flex-none text-slate-400" aria-hidden="true" />
+          <Megaphone class="h-[18px] w-[18px] flex-none text-slate-500" aria-hidden="true" />
           <span class="truncate" :class="labelClass">Report a concern</span>
         </router-link>
       </div>
@@ -111,8 +111,8 @@ function closeDrawer() {
         :title="collapsed ? 'Expand navigation' : 'Collapse navigation'"
         @click="toggleCollapsed"
       >
-        <PanelLeftOpen v-if="collapsed" class="h-[18px] w-[18px] flex-none text-slate-400" aria-hidden="true" />
-        <PanelLeftClose v-else class="h-[18px] w-[18px] flex-none text-slate-400" aria-hidden="true" />
+        <PanelLeftOpen v-if="collapsed" class="h-[18px] w-[18px] flex-none text-slate-500" aria-hidden="true" />
+        <PanelLeftClose v-else class="h-[18px] w-[18px] flex-none text-slate-500" aria-hidden="true" />
         <span :class="labelClass">Collapse</span>
       </button>
     </div>

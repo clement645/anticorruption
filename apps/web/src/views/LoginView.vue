@@ -218,7 +218,7 @@ async function submitMfa() {
           </form>
         </div>
 
-        <p class="mt-6 text-center text-xs text-slate-400">
+        <p class="mt-6 text-center text-xs text-slate-500">
           Authorised personnel only. Access is logged and monitored.
         </p>
       </div>

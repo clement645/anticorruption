@@ -28,6 +28,14 @@ interface AlertBody {
   status: string;
   reviewedById: string | null;
 }
+interface AlertListBody {
+  items: AlertBody[];
+  total: number;
+}
+/** GET /risk-alerts is paginated (section 10 QA finding) — this just unwraps the page. */
+function alertItems(res: { body: unknown }): AlertBody[] {
+  return (res.body as AlertListBody).items;
+}
 interface RiskProfileBody {
   riskLevel: string;
   score: string;
@@ -597,7 +605,7 @@ describe('AI Risk Engine (e2e)', () => {
       .query({ detectorType: 'PRICE_ANOMALY' })
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
-    const lotAlerts = (alerts.body as AlertBody[]).filter(
+    const lotAlerts = alertItems(alerts).filter(
       (a) => a.resourceType === 'Bid',
     );
 
@@ -660,7 +668,7 @@ describe('AI Risk Engine (e2e)', () => {
         })
         .set('Authorization', `Bearer ${fullToken}`)
         .expect(200);
-      expect(alerts.body as AlertBody[]).toHaveLength(0);
+      expect(alertItems(alerts)).toHaveLength(0);
     },
   );
 
@@ -684,7 +692,7 @@ describe('AI Risk Engine (e2e)', () => {
         .query({ detectorType: 'PRICE_ANOMALY' })
         .set('Authorization', `Bearer ${fullToken}`)
         .expect(200);
-      const falsePositives = (alerts.body as AlertBody[]).filter((a) =>
+      const falsePositives = alertItems(alerts).filter((a) =>
         bidIds.includes(a.resourceId),
       );
 
@@ -705,8 +713,8 @@ describe('AI Risk Engine (e2e)', () => {
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
 
-    expect(alerts.body as AlertBody[]).toHaveLength(1);
-    expect((alerts.body as AlertBody[])[0].severity).toBe('HIGH');
+    expect(alertItems(alerts)).toHaveLength(1);
+    expect(alertItems(alerts)[0].severity).toBe('HIGH');
   });
 
   it('does not flag collusion for a normally-spread set of bids', async () => {
@@ -724,7 +732,7 @@ describe('AI Risk Engine (e2e)', () => {
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
 
-    expect(alerts.body as AlertBody[]).toHaveLength(0);
+    expect(alertItems(alerts)).toHaveLength(0);
   });
 
   it('flags a split-procurement pattern once 3 under-threshold requests exceed it combined', async () => {
@@ -781,7 +789,7 @@ describe('AI Risk Engine (e2e)', () => {
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
 
-    expect((alerts.body as AlertBody[]).length).toBeGreaterThanOrEqual(1);
+    expect(alertItems(alerts).length).toBeGreaterThanOrEqual(1);
   });
 
   it('blocks approval of a request caught in an unresolved HIGH split-procurement alert, unblocks once an Auditor reviews it', async () => {
@@ -855,7 +863,9 @@ describe('AI Risk Engine (e2e)', () => {
       .query({ detectorType: 'SPLIT_PROCUREMENT', resourceId: thirdId })
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
-    const alertList = alerts.body as Array<{ id: string; severity: string }>;
+    const alertList = (
+      alerts.body as { items: Array<{ id: string; severity: string }> }
+    ).items;
     const highAlert = alertList.find((a) => a.severity === 'HIGH');
     expect(highAlert).toBeDefined();
 
@@ -912,7 +922,7 @@ describe('AI Risk Engine (e2e)', () => {
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
 
-    expect(alerts.body as AlertBody[]).toHaveLength(0);
+    expect(alertItems(alerts)).toHaveLength(0);
   });
 
   it('assesses supplier risk automatically on a PEP-owner add, and raises an alert once CRITICAL', async () => {
@@ -948,7 +958,7 @@ describe('AI Risk Engine (e2e)', () => {
       .query({ resourceType: 'Supplier', resourceId: supplierId })
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
-    expect(alerts.body as AlertBody[]).toHaveLength(0);
+    expect(alertItems(alerts)).toHaveLength(0);
 
     await request(app.getHttpServer())
       .post(`/api/v1/suppliers/${supplierId}/blacklist`)
@@ -966,7 +976,7 @@ describe('AI Risk Engine (e2e)', () => {
       .query({ resourceType: 'Supplier', resourceId: supplierId })
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
-    expect(alerts.body as AlertBody[]).toHaveLength(1);
+    expect(alertItems(alerts)).toHaveLength(1);
 
     // Re-triggering without any state change must not create a duplicate
     // OPEN alert for the same underlying finding.
@@ -979,7 +989,7 @@ describe('AI Risk Engine (e2e)', () => {
       .query({ resourceType: 'Supplier', resourceId: supplierId })
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
-    expect(alerts.body as AlertBody[]).toHaveLength(1);
+    expect(alertItems(alerts)).toHaveLength(1);
   });
 
   it('runs an alert through the full review workflow, and blocks re-review once resolved', async () => {
@@ -1002,7 +1012,7 @@ describe('AI Risk Engine (e2e)', () => {
       .query({ resourceType: 'Supplier', resourceId: supplierId })
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
-    const alertId = (alerts.body as AlertBody[])[0].id;
+    const alertId = alertItems(alerts)[0].id;
 
     await request(app.getHttpServer())
       .post(`/api/v1/risk-alerts/${alertId}/review`)
@@ -1033,13 +1043,25 @@ describe('AI Risk Engine (e2e)', () => {
       .expect(200);
     const body = summary.body as { total: number; bySeverity: Record<string, number> };
 
-    const list = await request(app.getHttpServer())
-      .get('/api/v1/risk-alerts')
-      .query({ status: 'OPEN' })
-      .set('Authorization', `Bearer ${fullToken}`)
-      .expect(200);
-    const rows = list.body as Array<{ severity: string }>;
+    // GET /risk-alerts is paginated (section 10 QA finding) and its page
+    // size is capped server-side, so this cross-check pages through the
+    // whole OPEN set itself rather than asking for one giant page — the
+    // same way a real client would have to.
+    const rows: Array<{ severity: string }> = [];
+    let reportedTotal = 0;
+    for (let skip = 0; ; skip += 100) {
+      const list = await request(app.getHttpServer())
+        .get('/api/v1/risk-alerts')
+        .query({ status: 'OPEN', skip: String(skip), take: '100' })
+        .set('Authorization', `Bearer ${fullToken}`)
+        .expect(200);
+      const listBody = list.body as { items: Array<{ severity: string }>; total: number };
+      reportedTotal = listBody.total;
+      rows.push(...listBody.items);
+      if (listBody.items.length < 100) break;
+    }
 
+    expect(body.total).toBe(reportedTotal);
     expect(body.total).toBe(rows.length);
     for (const severity of ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']) {
       expect(body.bySeverity[severity]).toBe(rows.filter((r) => r.severity === severity).length);

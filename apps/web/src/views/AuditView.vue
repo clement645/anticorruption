@@ -144,7 +144,7 @@ async function toggleVerify(eventId: string) {
             <th>Resource</th>
             <th>Anchored</th>
             <th>When</th>
-            <th></th>
+            <th><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -203,7 +203,7 @@ async function toggleVerify(eventId: string) {
                   <span :class="audit.eventVerifications[event.id].checks.signatureValid ? 'text-emerald-700' : 'text-red-700'">
                     {{ audit.eventVerifications[event.id].checks.signatureValid ? '✓' : '✗' }} signature
                   </span>
-                  <span :class="audit.eventVerifications[event.id].blockchainAnchor.anchored ? 'text-emerald-700' : 'text-slate-400'">
+                  <span :class="audit.eventVerifications[event.id].blockchainAnchor.anchored ? 'text-emerald-700' : 'text-slate-500'">
                     {{ audit.eventVerifications[event.id].blockchainAnchor.anchored ? '✓' : '—' }} blockchain anchor
                   </span>
                 </div>

@@ -65,7 +65,7 @@ function nextStatuses(current: string): string[] {
       <div class="card p-4">
         <div class="flex items-center justify-between">
           <h2 class="section-title">Reports</h2>
-          <select v-model="statusFilter" class="select w-auto px-2 py-1 text-xs" @change="applyFilter">
+          <select v-model="statusFilter" aria-label="Filter by status" class="select w-auto px-2 py-1 text-xs" @change="applyFilter">
             <option value="">All statuses</option>
             <option value="SUBMITTED">Submitted</option>
             <option value="UNDER_REVIEW">Under review</option>
@@ -98,7 +98,7 @@ function nextStatuses(current: string): string[] {
               <p class="mt-1 line-clamp-2 text-slate-500">{{ r.description }}</p>
             </button>
           </li>
-          <li v-if="store.reports.length === 0" class="py-6 text-center text-xs text-slate-400">
+          <li v-if="store.reports.length === 0" class="py-6 text-center text-xs text-slate-500">
             No reports.
           </li>
         </ul>
@@ -150,7 +150,7 @@ function nextStatuses(current: string): string[] {
             {{ e.fileName }} — <span class="font-mono">{{ e.fileHash.slice(0, 12) }}…</span>
             <span v-if="e.anchored" class="text-emerald-700">(anchored)</span>
           </li>
-          <li v-if="store.reportDetail.evidence.length === 0" class="text-xs text-slate-400">None.</li>
+          <li v-if="store.reportDetail.evidence.length === 0" class="text-xs text-slate-500">None.</li>
         </ul>
 
         <h3 class="mt-4 text-xs font-medium uppercase text-slate-500">Conversation</h3>
@@ -161,14 +161,14 @@ function nextStatuses(current: string): string[] {
             </span>
             {{ u.message }}
           </li>
-          <li v-if="store.reportDetail.updates.length === 0" class="text-xs text-slate-400">No messages yet.</li>
+          <li v-if="store.reportDetail.updates.length === 0" class="text-xs text-slate-500">No messages yet.</li>
         </ul>
         <form class="mt-3 flex gap-2" @submit.prevent="handlePostUpdate">
           <input v-model="updateMessage" placeholder="Ask a follow-up question…" class="input flex-1 px-2 py-1 text-xs" />
           <button type="submit" class="btn btn-secondary btn-sm">Send</button>
         </form>
       </div>
-      <div v-else class="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+      <div v-else class="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-500">
         Select a report to view details.
       </div>
     </div>

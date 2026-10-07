@@ -42,6 +42,11 @@ const STATUSES: Record<string, StatusDefinition> = {
   // status (APPROVED/REJECTED above): this labels one approver's vote.
   APPROVE: { label: 'Approved', tone: 'success' },
   REJECT: { label: 'Rejected', tone: 'danger' },
+  // RiskAlert.status — a human review outcome, distinct from REVIEWED/
+  // PENDING above (OPEN reuses no existing key; UNDER_REVIEW already does).
+  OPEN: { label: 'Open', tone: 'warning' },
+  CONFIRMED: { label: 'Confirmed', tone: 'danger' },
+  DISMISSED: { label: 'Dismissed', tone: 'neutral' },
   LOW: { label: 'Low', tone: 'success' },
   MEDIUM: { label: 'Medium', tone: 'warning' },
   HIGH: { label: 'High', tone: 'danger' },

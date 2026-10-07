@@ -178,23 +178,23 @@ async function handleRecordRisk() {
       <div class="mt-6 card p-6">
         <h2 class="section-title">Profile</h2>
         <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
-          <dt class="text-slate-400">Business type</dt>
+          <dt class="text-slate-500">Business type</dt>
           <dd>{{ supplier.profile.businessType ?? '—' }}</dd>
-          <dt class="text-slate-400">Tax identifier</dt>
+          <dt class="text-slate-500">Tax identifier</dt>
           <dd>{{ supplier.profile.taxIdentifier ?? '—' }}</dd>
-          <dt class="text-slate-400">County</dt>
+          <dt class="text-slate-500">County</dt>
           <dd>{{ supplier.profile.county ?? '—' }}</dd>
-          <dt class="text-slate-400">Physical address</dt>
+          <dt class="text-slate-500">Physical address</dt>
           <dd>{{ supplier.profile.physicalAddress ?? '—' }}</dd>
-          <dt class="text-slate-400">Contact person</dt>
+          <dt class="text-slate-500">Contact person</dt>
           <dd>{{ supplier.profile.contactPersonName ?? '—' }}</dd>
-          <dt class="text-slate-400">Email</dt>
+          <dt class="text-slate-500">Email</dt>
           <dd>{{ supplier.profile.email ?? '—' }}</dd>
         </dl>
 
         <template v-if="canManage">
           <form class="mt-4 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3" @submit.prevent="handleUpdateProfile">
-            <select v-model="profileForm.businessType" class="select">
+            <select v-model="profileForm.businessType" aria-label="Business type" class="select">
               <option value="">Business type…</option>
               <option value="SOLE_PROPRIETORSHIP">Sole proprietorship</option>
               <option value="PARTNERSHIP">Partnership</option>
@@ -240,6 +240,7 @@ async function handleRecordRisk() {
       <!-- Beneficial owners -->
       <div v-if="canReadSensitive" class="mt-6 card p-6">
         <h2 class="section-title">Beneficial Owners</h2>
+        <div class="overflow-x-auto">
         <table class="mt-2 w-full text-xs">
           <thead>
             <tr class="text-left text-slate-500">
@@ -247,7 +248,7 @@ async function handleRecordRisk() {
               <th class="pr-2">ID/Passport</th>
               <th class="pr-2">Ownership</th>
               <th class="pr-2">PEP</th>
-              <th></th>
+              <th><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -266,6 +267,7 @@ async function handleRecordRisk() {
             </tr>
           </tbody>
         </table>
+        </div>
         <form v-if="canManage" class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleAddOwner">
           <input v-model="ownerForm.fullName" required placeholder="Full name" class="input" />
           <input v-model="ownerForm.nationalIdOrPassport" required placeholder="National ID / Passport" class="input" />
@@ -282,6 +284,7 @@ async function handleRecordRisk() {
       <!-- Compliance documents -->
       <div v-if="canReadSensitive" class="mt-6 card p-6">
         <h2 class="section-title">Compliance Documents</h2>
+        <div class="overflow-x-auto">
         <table class="mt-2 w-full text-xs">
           <thead>
             <tr class="text-left text-slate-500">
@@ -289,7 +292,7 @@ async function handleRecordRisk() {
               <th class="pr-2">File</th>
               <th class="pr-2">SHA-256</th>
               <th class="pr-2">Status</th>
-              <th></th>
+              <th><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -323,20 +326,21 @@ async function handleRecordRisk() {
             </tr>
           </tbody>
         </table>
+        </div>
         <form v-if="canManage" class="mt-3 flex flex-wrap items-center gap-2" @submit.prevent="handleUploadDocument">
-          <select v-model="documentForm.documentType" class="select w-auto">
+          <select v-model="documentForm.documentType" aria-label="Document type" class="select w-auto max-w-full">
             <option value="REGISTRATION_CERTIFICATE">Registration certificate</option>
             <option value="TAX_COMPLIANCE_CERTIFICATE">Tax compliance certificate</option>
             <option value="CR12">CR12</option>
             <option value="PIN_CERTIFICATE">PIN certificate</option>
             <option value="OTHER">Other</option>
           </select>
-          <input type="file" required class="text-xs" @change="onFileChange" />
+          <input type="file" required aria-label="Document file" class="text-xs" @change="onFileChange" />
           <button type="submit" :disabled="uploading || !documentForm.file" class="btn btn-primary btn-sm">
             {{ uploading ? 'Uploading…' : 'Upload' }}
           </button>
         </form>
-        <p class="mt-1 text-[11px] text-slate-400">
+        <p class="mt-1 text-[11px] text-slate-500">
           Only the document's SHA-256 hash and metadata are stored — see SECURITY.md for the object-storage limitation.
         </p>
       </div>
@@ -356,25 +360,27 @@ async function handleRecordRisk() {
             {{ supplier.currentRisk.riskLevel }}
           </span>
           <span class="text-slate-600">Score {{ supplier.currentRisk.score }}/100</span>
-          <span v-if="supplier.currentRisk.notes" class="text-slate-400">{{ supplier.currentRisk.notes }}</span>
+          <span v-if="supplier.currentRisk.notes" class="text-slate-500">{{ supplier.currentRisk.notes }}</span>
         </div>
-        <p v-else class="mt-2 text-xs text-slate-400">No risk assessment recorded yet.</p>
+        <p v-else class="mt-2 text-xs text-slate-500">No risk assessment recorded yet.</p>
 
         <details v-if="supplier.riskHistory.length" class="mt-2">
           <summary class="cursor-pointer text-xs text-slate-500">History ({{ supplier.riskHistory.length }})</summary>
+          <div class="overflow-x-auto">
           <table class="mt-1 w-full text-xs">
             <tbody>
               <tr v-for="entry in supplier.riskHistory" :key="entry.id" class="border-t border-slate-100">
                 <td class="py-1 pr-2">{{ entry.riskLevel }}</td>
                 <td class="py-1 pr-2">{{ entry.score }}</td>
-                <td class="py-1 pr-2 text-slate-400">{{ new Date(entry.assessedAt).toLocaleString() }}</td>
+                <td class="py-1 pr-2 text-slate-500">{{ new Date(entry.assessedAt).toLocaleString() }}</td>
               </tr>
             </tbody>
           </table>
+          </div>
         </details>
 
         <form v-if="canVerify" class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleRecordRisk">
-          <select v-model="riskForm.riskLevel" class="select w-auto">
+          <select v-model="riskForm.riskLevel" aria-label="Risk level" class="select w-auto max-w-full">
             <option value="LOW">Low</option>
             <option value="MEDIUM">Medium</option>
             <option value="HIGH">High</option>

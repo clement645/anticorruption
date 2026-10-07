@@ -355,11 +355,11 @@ async function handleVerifyEvidence(evidenceId: string) {
         <input v-model="projectForm.name" required placeholder="Name" class="input" />
         <input v-model="projectForm.description" required placeholder="Description" class="input" />
         <input v-model="projectForm.location" placeholder="Location (optional)" class="input" />
-        <input v-model="projectForm.startDate" type="date" required class="input" />
-        <input v-model="projectForm.plannedEndDate" type="date" required class="input" />
+        <input v-model="projectForm.startDate" type="date" required aria-label="Start date" class="input" />
+        <input v-model="projectForm.plannedEndDate" type="date" required aria-label="Planned end date" class="input" />
         <button type="submit" class="btn btn-primary btn-sm">Create project</button>
       </form>
-      <p v-if="canManageProjects" class="px-4 pb-4 text-[11px] text-slate-400">
+      <p v-if="canManageProjects" class="px-4 pb-4 text-[11px] text-slate-500">
         Enter the ID of an ACTIVE contract with no project yet — the organization is derived server-side from the contract, not entered here.
       </p>
     </div>
@@ -370,7 +370,7 @@ async function handleVerifyEvidence(evidenceId: string) {
         <h2 class="section-title">{{ selectedProject.name }} — Milestones</h2>
         <StatusBadge :status="selectedProject.status" />
       </div>
-      <p class="mt-1 text-[11px] text-slate-400">
+      <p class="mt-1 text-[11px] text-slate-500">
         Milestones can only be added while the project is PLANNED — the list is frozen once activated.
       </p>
 
@@ -386,7 +386,7 @@ async function handleVerifyEvidence(evidenceId: string) {
         <div class="flex items-center justify-between gap-2">
           <span class="font-medium text-slate-900">#{{ m.sequenceNumber }} {{ m.title }}</span>
           <StatusBadge :status="m.status" />
-          <span class="num text-slate-400">{{ money(m.plannedAmount) }} due {{ new Date(m.plannedDate).toLocaleDateString() }}</span>
+          <span class="num text-slate-500">{{ money(m.plannedAmount) }} due {{ new Date(m.plannedDate).toLocaleDateString() }}</span>
         </div>
         <p class="mt-1 text-slate-500">{{ m.description }}</p>
 
@@ -432,7 +432,7 @@ async function handleVerifyEvidence(evidenceId: string) {
         <input v-model="milestoneForm.title" required placeholder="Title" class="input" />
         <input v-model="milestoneForm.description" required placeholder="Description" class="input" />
         <input v-model.number="milestoneForm.plannedAmount" type="number" min="1" required placeholder="Amount" class="input w-28" />
-        <input v-model="milestoneForm.plannedDate" type="date" required class="input" />
+        <input v-model="milestoneForm.plannedDate" type="date" required aria-label="Planned date" class="input" />
         <button type="submit" class="btn btn-primary btn-sm">Add milestone</button>
       </form>
 
@@ -474,13 +474,13 @@ async function handleVerifyEvidence(evidenceId: string) {
         </table>
       </div>
       <form v-if="canUploadEvidence" class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleUploadEvidence">
-        <input type="file" required class="text-sm" @change="onFileChange" />
+        <input type="file" required aria-label="Evidence file" class="text-sm" @change="onFileChange" />
         <input v-model="evidenceInspectionId" placeholder="Inspection ID (optional)" class="input w-56" />
         <button type="submit" :disabled="uploading" class="btn btn-primary btn-sm">
           {{ uploading ? 'Uploading…' : 'Upload evidence' }}
         </button>
       </form>
-      <p class="mt-1 text-[11px] text-slate-400">
+      <p class="mt-1 text-[11px] text-slate-500">
         Encrypted at rest (AES-256-GCM), hashed with SHA-256, anchored on the blockchain, and re-verified on every download.
       </p>
     </div>

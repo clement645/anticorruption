@@ -253,6 +253,7 @@ async function confirmAction() {
     <!-- Procurement Plans -->
     <div v-if="auth.hasPermission('procurement:manage')" class="mt-6 card p-6">
       <h2 class="section-title">Procurement Plans</h2>
+      <div class="overflow-x-auto">
       <table class="mt-2 w-full text-xs">
         <tbody>
           <tr v-for="p in procurement.plans" :key="p.id" class="border-t border-slate-100">
@@ -272,12 +273,13 @@ async function confirmAction() {
           </tr>
         </tbody>
       </table>
+      </div>
       <form class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleCreatePlan">
-        <select v-model="newPlan.organizationId" required class="select w-auto">
+        <select v-model="newPlan.organizationId" required aria-label="Organization" class="select w-auto max-w-full">
           <option value="" disabled>Organization</option>
           <option v-for="org in organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
         </select>
-        <select v-model="newPlan.fiscalYearId" required class="select w-auto">
+        <select v-model="newPlan.fiscalYearId" required aria-label="Fiscal year" class="select w-auto max-w-full">
           <option value="" disabled>Fiscal year</option>
           <option v-for="fy in budget.fiscalYears" :key="fy.id" :value="fy.id">{{ fy.name }}</option>
         </select>
@@ -289,6 +291,7 @@ async function confirmAction() {
     <!-- Procurement Requests -->
     <div class="mt-6 card p-6">
       <h2 class="section-title">Procurement Requests</h2>
+      <div class="overflow-x-auto">
       <table class="mt-2 w-full text-xs">
         <thead>
           <tr class="text-left text-slate-500">
@@ -326,19 +329,20 @@ async function confirmAction() {
           </tr>
         </tbody>
       </table>
+      </div>
       <form v-if="auth.hasPermission('procurement:create')" class="mt-3 space-y-2" @submit.prevent="handleCreateRequest">
         <div class="flex flex-wrap gap-2">
-          <select v-model="newRequest.procurementPlanId" required class="select w-auto">
+          <select v-model="newRequest.procurementPlanId" required aria-label="Plan" class="select w-auto max-w-full">
             <option value="" disabled>Plan</option>
             <option v-for="p in procurement.plans.filter((x) => x.status === 'APPROVED')" :key="p.id" :value="p.id">
               {{ p.name }}
             </option>
           </select>
-          <select v-model="newRequest.organizationId" required class="select w-auto">
+          <select v-model="newRequest.organizationId" required aria-label="Organization" class="select w-auto max-w-full">
             <option value="" disabled>Organization</option>
             <option v-for="org in organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
           </select>
-          <select v-model="newRequest.allocationId" required class="select w-auto">
+          <select v-model="newRequest.allocationId" required aria-label="Allocation" class="select w-auto max-w-full">
             <option value="" disabled>Allocation</option>
             <option v-for="a in budget.allocations" :key="a.id" :value="a.id">
               {{ a.authorizationReference }} (avail: {{ money(a.availableAmount) }})
@@ -374,6 +378,7 @@ async function confirmAction() {
           </div>
         </div>
 
+        <div class="overflow-x-auto">
         <table class="mt-2 w-full text-xs">
           <tbody>
             <tr v-for="lot in t.lots" :key="lot.id" class="border-t border-slate-100">
@@ -387,8 +392,10 @@ async function confirmAction() {
             </tr>
           </tbody>
         </table>
+        </div>
 
         <div v-if="expandedLotId" class="mt-2 rounded-lg bg-slate-50 p-2">
+          <div class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead>
               <tr class="text-left text-slate-500">
@@ -432,8 +439,9 @@ async function confirmAction() {
               </tr>
             </tbody>
           </table>
+          </div>
           <form v-if="auth.hasPermission('procurement:bid')" class="mt-2 flex items-center gap-1" @submit.prevent="handleSubmitBid(expandedLotId)">
-            <select v-model="bidForm.supplierId" required class="select w-auto px-1.5 py-1 text-xs">
+            <select v-model="bidForm.supplierId" required aria-label="Supplier" class="select w-auto max-w-full px-1.5 py-1 text-xs">
               <option value="" disabled>Supplier</option>
               <option v-for="s in procurement.suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
             </select>
@@ -445,7 +453,7 @@ async function confirmAction() {
 
       <form v-if="auth.hasPermission('procurement:create')" class="mt-4 space-y-2 border-t border-slate-100 pt-3" @submit.prevent="handleCreateTender">
         <div class="flex flex-wrap gap-2">
-          <select v-model="newTender.procurementRequestId" required class="select w-auto">
+          <select v-model="newTender.procurementRequestId" required aria-label="Approved request" class="select w-auto max-w-full">
             <option value="" disabled>Approved request</option>
             <option v-for="r in procurement.requests.filter((x) => x.status === 'APPROVED')" :key="r.id" :value="r.id">
               {{ r.title }}
@@ -453,17 +461,19 @@ async function confirmAction() {
           </select>
           <input v-model="newTender.title" required placeholder="Tender title" class="input" />
           <input v-model="newTender.description" required placeholder="Description" class="input" />
-          <input v-model="newTender.closingDate" type="date" required class="input" />
+          <input v-model="newTender.closingDate" type="date" required aria-label="Closing date" class="input" />
         </div>
-        <table class="w-full text-xs">
-          <tbody>
-            <tr v-for="(lot, i) in newTender.lots" :key="i">
-              <td class="py-1 pr-2"><input v-model="lot.lotNumber" required placeholder="Lot #" class="input w-20 px-1.5 py-1 text-xs" /></td>
-              <td class="py-1 pr-2"><input v-model="lot.description" required placeholder="Description" class="input w-40 px-1.5 py-1 text-xs" /></td>
-              <td class="py-1 pr-2"><input v-model.number="lot.estimatedAmount" type="number" min="1" required placeholder="Amount" class="input w-24 px-1.5 py-1 text-xs" /></td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[360px] text-xs">
+            <tbody>
+              <tr v-for="(lot, i) in newTender.lots" :key="i">
+                <td class="py-1 pr-2"><input v-model="lot.lotNumber" required placeholder="Lot #" class="input w-20 px-1.5 py-1 text-xs" /></td>
+                <td class="py-1 pr-2"><input v-model="lot.description" required placeholder="Description" class="input w-40 px-1.5 py-1 text-xs" /></td>
+                <td class="py-1 pr-2"><input v-model.number="lot.estimatedAmount" type="number" min="1" required placeholder="Amount" class="input w-24 px-1.5 py-1 text-xs" /></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <button type="button" class="btn btn-ghost btn-sm" @click="addLot">+ Add lot</button>
         <div>
           <button type="submit" class="btn btn-primary">Create tender</button>

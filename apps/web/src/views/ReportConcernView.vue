@@ -84,7 +84,7 @@ function formatCategory(category: string): string {
       </p>
     </div>
 
-    <nav class="mt-6 flex gap-1 border-b border-slate-200 text-sm">
+    <nav class="mt-6 flex gap-1 border-b border-slate-200 text-sm" aria-label="Report a concern sections">
       <button
         type="button"
         class="tab-pill"
@@ -134,7 +134,7 @@ function formatCategory(category: string): string {
       <form v-else class="space-y-3" @submit.prevent="handleSubmit">
         <div>
           <label class="field-label">Category</label>
-          <select v-model="submitForm.category" class="select mt-1">
+          <select v-model="submitForm.category" aria-label="Category" class="select mt-1">
             <option v-for="c in categories" :key="c" :value="c">{{ formatCategory(c) }}</option>
           </select>
         </div>
@@ -151,7 +151,7 @@ function formatCategory(category: string): string {
         </div>
         <div>
           <label class="field-label">Supporting evidence (optional)</label>
-          <input type="file" class="mt-1 text-sm" @change="onFileChange" />
+          <input type="file" aria-label="Supporting evidence (optional)" class="mt-1 text-sm" @change="onFileChange" />
         </div>
         <div>
           <label class="field-label">Contact (optional — only if you want to be reachable)</label>
@@ -160,7 +160,7 @@ function formatCategory(category: string): string {
             placeholder="Email or phone — left blank by default"
             class="input mt-1"
           />
-          <p class="mt-1 text-[11px] text-slate-400">
+          <p class="mt-1 text-[11px] text-slate-500">
             Encrypted at rest and visible only to the investigator assigned to your report. You
             can safely leave this blank — the tracking code alone is enough to follow up.
           </p>
@@ -194,7 +194,7 @@ function formatCategory(category: string): string {
           <li v-for="e in store.reportStatus.evidence" :key="e.id" class="text-xs text-slate-600">
             {{ e.fileName }} <span v-if="e.anchored" class="text-emerald-700">(anchored)</span>
           </li>
-          <li v-if="store.reportStatus.evidence.length === 0" class="text-xs text-slate-400">None yet.</li>
+          <li v-if="store.reportStatus.evidence.length === 0" class="text-xs text-slate-500">None yet.</li>
         </ul>
 
         <h3 class="mt-3 text-xs font-medium uppercase text-slate-500">Conversation</h3>
@@ -205,7 +205,7 @@ function formatCategory(category: string): string {
             </span>
             {{ u.message }}
           </li>
-          <li v-if="store.reportStatus.updates.length === 0" class="text-xs text-slate-400">No messages yet.</li>
+          <li v-if="store.reportStatus.updates.length === 0" class="text-xs text-slate-500">No messages yet.</li>
         </ul>
 
         <form class="mt-3 flex gap-2" @submit.prevent="handleReply">
@@ -217,6 +217,7 @@ function formatCategory(category: string): string {
           <label class="field-label">Add more evidence</label>
           <input
             type="file"
+            aria-label="Add more evidence"
             class="mt-1 text-xs"
             @change="
               async (e) => {
