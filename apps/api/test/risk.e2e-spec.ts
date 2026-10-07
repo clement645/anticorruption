@@ -1025,6 +1025,27 @@ describe('AI Risk Engine (e2e)', () => {
       .expect(400);
   });
 
+  it('summarises open alerts by severity to match the full list, without listing them all', async () => {
+    const summary = await request(app.getHttpServer())
+      .get('/api/v1/risk-alerts/summary')
+      .query({ status: 'OPEN' })
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
+    const body = summary.body as { total: number; bySeverity: Record<string, number> };
+
+    const list = await request(app.getHttpServer())
+      .get('/api/v1/risk-alerts')
+      .query({ status: 'OPEN' })
+      .set('Authorization', `Bearer ${fullToken}`)
+      .expect(200);
+    const rows = list.body as Array<{ severity: string }>;
+
+    expect(body.total).toBe(rows.length);
+    for (const severity of ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']) {
+      expect(body.bySeverity[severity]).toBe(rows.filter((r) => r.severity === severity).length);
+    }
+  });
+
   it('manual risk-scan endpoints require risk:manage and 404 on an unknown resource', async () => {
     await request(app.getHttpServer())
       .post('/api/v1/risk-scans/suppliers/00000000-0000-0000-0000-000000000000')

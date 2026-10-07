@@ -117,6 +117,29 @@ export class RiskAlertsService {
     return toView(alert);
   }
 
+  /**
+   * Counts by severity, computed in the database. The dashboard uses this rather
+   * than listing every alert just to count them.
+   */
+  async summary(status?: string): Promise<{
+    total: number;
+    bySeverity: Record<'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL', number>;
+  }> {
+    const where = status ? { status: status as never } : {};
+    const groups = await this.prisma.riskAlert.groupBy({
+      by: ['severity'],
+      where,
+      _count: { _all: true },
+    });
+    const bySeverity = { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 };
+    let total = 0;
+    for (const group of groups) {
+      bySeverity[group.severity] = group._count._all;
+      total += group._count._all;
+    }
+    return { total, bySeverity };
+  }
+
   async list(params: {
     status?: string;
     severity?: string;

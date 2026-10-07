@@ -44,6 +44,11 @@ export class RiskAlertsController {
     });
   }
 
+  @Get('summary')
+  summary(@Query('status') status?: string) {
+    return this.riskAlertsService.summary(status);
+  }
+
   @Get(':id')
   get(@Param('id') id: string) {
     return this.riskAlertsService.getView(id);

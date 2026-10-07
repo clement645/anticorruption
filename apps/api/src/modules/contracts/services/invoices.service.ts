@@ -174,8 +174,9 @@ export class InvoicesService {
     return toView(invoice);
   }
 
-  async list(): Promise<InvoiceView[]> {
+  async list(status?: string): Promise<InvoiceView[]> {
     const invoices = await this.prisma.invoice.findMany({
+      where: status ? { status: status as never } : undefined,
       include: { items: true },
       orderBy: { createdAt: 'desc' },
     });

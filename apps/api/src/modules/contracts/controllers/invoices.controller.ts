@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   Req,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
@@ -27,8 +28,8 @@ export class InvoicesController {
   constructor(private readonly invoicesService: InvoicesService) {}
 
   @Get()
-  list() {
-    return this.invoicesService.list();
+  list(@Query('status') status?: string) {
+    return this.invoicesService.list(status);
   }
 
   @Get(':id')
