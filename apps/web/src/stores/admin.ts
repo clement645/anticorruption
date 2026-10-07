@@ -52,6 +52,8 @@ export interface AdminUser {
   lastLoginAt: string | null
   createdAt: string
   roles: AdminRole[]
+  mfaEnabled: boolean
+  mustChangePassword: boolean
 }
 
 interface CreateUserInput {
@@ -135,6 +137,20 @@ export const useAdminStore = defineStore('admin', {
       })
       await this.fetchUsers()
       return updated
+    },
+
+    /** Issues a one-time temporary password. The caller must show it once. */
+    async resetPassword(id: string) {
+      const stepUpToken = await requestStepUpToken()
+      return apiPost<{ temporaryPassword: string }>(`/users/${id}/password/reset`, undefined, {
+        'X-Step-Up-Token': stepUpToken,
+      })
+    },
+
+    async resetMfa(id: string) {
+      const stepUpToken = await requestStepUpToken()
+      await apiPost<void>(`/users/${id}/mfa/reset`, undefined, { 'X-Step-Up-Token': stepUpToken })
+      await this.fetchUsers()
     },
 
     async fetchRoleDetails() {

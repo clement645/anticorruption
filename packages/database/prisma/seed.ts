@@ -24,6 +24,18 @@ const PERMISSIONS: Array<{
     description: "Update a user's roles, status, organization, or department",
   },
   {
+    resource: "users",
+    action: "reset_password",
+    description:
+      "Issue a one-time temporary password for another user (Super Administrator only by default)",
+  },
+  {
+    resource: "users",
+    action: "reset_mfa",
+    description:
+      "Remove another user's authenticator so they can enrol again (Super Administrator only by default)",
+  },
+  {
     resource: "roles",
     action: "read",
     description: "View roles and their permissions",

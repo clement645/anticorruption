@@ -10,7 +10,10 @@ const router = useRouter()
 const email = ref('')
 const password = ref('')
 const mfaCode = ref('')
-const stage = ref<'credentials' | 'mfa'>('credentials')
+const stage = ref<'credentials' | 'mfa' | 'change-password'>('credentials')
+const newPassword = ref('')
+const confirmPassword = ref('')
+const notice = ref<string | null>(null)
 const submitting = ref(false)
 const localError = ref<string | null>(null)
 
@@ -21,11 +24,39 @@ async function submitCredentials() {
     const result = await auth.login(email.value, password.value)
     if (result === 'mfa_required') {
       stage.value = 'mfa'
+    } else if (result === 'password_change_required') {
+      stage.value = 'change-password'
+      password.value = ''
     } else {
       await router.push('/')
     }
   } catch {
     localError.value = auth.error ?? 'Unable to sign in'
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function submitNewPassword() {
+  localError.value = null
+  if (newPassword.value.length < 12) {
+    localError.value = 'The new password must be at least 12 characters.'
+    return
+  }
+  if (newPassword.value !== confirmPassword.value) {
+    localError.value = 'The two passwords do not match.'
+    return
+  }
+  submitting.value = true
+  try {
+    await auth.changePassword(newPassword.value)
+    newPassword.value = ''
+    confirmPassword.value = ''
+    password.value = ''
+    stage.value = 'credentials'
+    notice.value = 'Your password has been updated. Sign in with your new password.'
+  } catch {
+    localError.value = auth.error ?? 'Unable to change password'
   } finally {
     submitting.value = false
   }
@@ -83,6 +114,10 @@ async function submitMfa() {
         <h2 class="font-serif text-2xl font-semibold tracking-tight text-slate-900">Sign in</h2>
         <p class="mt-1 text-sm text-slate-500">Enter your credentials to access your portal.</p>
 
+        <p v-if="notice" class="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900" role="status">
+          {{ notice }}
+        </p>
+
         <div class="card mt-6 p-6 sm:p-7">
           <form
             v-if="stage === 'credentials'"
@@ -120,7 +155,7 @@ async function submitMfa() {
             </button>
           </form>
 
-          <form v-else class="space-y-4" @submit.prevent="submitMfa">
+          <form v-else-if="stage === 'mfa'" class="space-y-4" @submit.prevent="submitMfa">
             <div>
               <label for="mfaCode" class="field-label">Authenticator code or backup code</label>
               <input
@@ -138,6 +173,47 @@ async function submitMfa() {
             <button type="submit" :disabled="submitting" class="btn btn-primary w-full">
               <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
               {{ submitting ? 'Verifying…' : 'Verify' }}
+            </button>
+          </form>
+
+          <form v-else-if="stage === 'change-password'" class="space-y-4" @submit.prevent="submitNewPassword">
+            <div>
+              <h3 class="text-base font-semibold text-slate-900">Choose a new password</h3>
+              <p class="mt-1 text-sm text-slate-500">
+                Your administrator issued a temporary password. Set your own before you continue. You will sign in again
+                with the new one.
+              </p>
+            </div>
+            <div>
+              <label for="newPassword" class="field-label">New password</label>
+              <input
+                id="newPassword"
+                v-model="newPassword"
+                type="password"
+                required
+                minlength="12"
+                autocomplete="new-password"
+                class="input mt-1"
+              />
+              <p class="mt-1 text-xs text-slate-500">At least 12 characters.</p>
+            </div>
+            <div>
+              <label for="confirmPassword" class="field-label">Confirm new password</label>
+              <input
+                id="confirmPassword"
+                v-model="confirmPassword"
+                type="password"
+                required
+                autocomplete="new-password"
+                class="input mt-1"
+              />
+            </div>
+
+            <p v-if="localError" class="alert-error">{{ localError }}</p>
+
+            <button type="submit" :disabled="submitting" class="btn btn-primary w-full">
+              <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
+              {{ submitting ? 'Saving…' : 'Set new password' }}
             </button>
           </form>
         </div>

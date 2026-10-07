@@ -20,16 +20,26 @@ interface MfaRequiredResponse {
   mfaToken: string
 }
 
-type LoginApiResponse = LoginResponse | MfaRequiredResponse
+interface PasswordChangeRequiredResponse {
+  passwordChangeRequired: true
+  changeToken: string
+}
+
+type LoginApiResponse = LoginResponse | MfaRequiredResponse | PasswordChangeRequiredResponse
 
 function isMfaRequired(body: LoginApiResponse): body is MfaRequiredResponse {
   return 'mfaRequired' in body && body.mfaRequired === true
+}
+
+function isPasswordChangeRequired(body: LoginApiResponse): body is PasswordChangeRequiredResponse {
+  return 'passwordChangeRequired' in body && body.passwordChangeRequired === true
 }
 
 interface AuthState {
   user: AuthenticatedUser | null
   status: 'unknown' | 'authenticated' | 'unauthenticated'
   pendingMfaToken: string | null
+  pendingChangeToken: string | null
   error: string | null
   loading: boolean
 }
@@ -39,6 +49,7 @@ export const useAuthStore = defineStore('auth', {
     user: null,
     status: 'unknown',
     pendingMfaToken: null,
+    pendingChangeToken: null,
     error: null,
     loading: false,
   }),
@@ -64,7 +75,10 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    async login(email: string, password: string): Promise<'authenticated' | 'mfa_required'> {
+    async login(
+      email: string,
+      password: string,
+    ): Promise<'authenticated' | 'mfa_required' | 'password_change_required'> {
       this.loading = true
       this.error = null
       try {
@@ -73,12 +87,37 @@ export const useAuthStore = defineStore('auth', {
           this.pendingMfaToken = body.mfaToken
           return 'mfa_required'
         }
+        if (isPasswordChangeRequired(body)) {
+          this.pendingChangeToken = body.changeToken
+          return 'password_change_required'
+        }
         setAccessToken(body.accessToken)
         await this.fetchMe()
         this.status = 'authenticated'
         return 'authenticated'
       } catch (err) {
         this.error = err instanceof ApiError ? err.message : 'Unable to sign in'
+        throw err
+      } finally {
+        this.loading = false
+      }
+    },
+
+    /** Completes a forced password change. The user signs in again afterwards. */
+    async changePassword(newPassword: string) {
+      if (!this.pendingChangeToken) {
+        throw new Error('No pending password change')
+      }
+      this.loading = true
+      this.error = null
+      try {
+        await apiPost<void>('/auth/password/change', {
+          changeToken: this.pendingChangeToken,
+          newPassword,
+        })
+        this.pendingChangeToken = null
+      } catch (err) {
+        this.error = err instanceof ApiError ? err.message : 'Unable to change password'
         throw err
       } finally {
         this.loading = false

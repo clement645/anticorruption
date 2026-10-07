@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 
-import { UserPlus, X, Pencil, Loader2 } from '@lucide/vue'
+import { UserPlus, X, Pencil, Loader2, KeyRound, ShieldOff, Copy, Check } from '@lucide/vue'
 import { useAuthStore } from '../stores/auth'
 import { useAdminStore, type AdminUser } from '../stores/admin'
 import { ApiError } from '../api/client'
@@ -40,6 +40,51 @@ function statusBadgeClass(status: AdminUser['status']) {
 
 function openCreate() {
   createOpen.value = true
+}
+
+const canManageUsers = computed(
+  () => auth.hasPermission('users:update') || auth.hasPermission('users:reset_password') || auth.hasPermission('users:reset_mfa'),
+)
+const resetResult = ref<{ email: string; temporaryPassword: string } | null>(null)
+const resetCopied = ref(false)
+const actionError = ref<string | null>(null)
+
+async function doResetPassword(u: AdminUser) {
+  if (!window.confirm(`Issue a new temporary password for ${u.email}? Their current sessions will end.`)) return
+  actionError.value = null
+  try {
+    const result = await admin.resetPassword(u.id)
+    resetResult.value = { email: u.email, temporaryPassword: result.temporaryPassword }
+    await admin.fetchUsers()
+  } catch (err) {
+    actionError.value = err instanceof ApiError ? err.message : 'Unable to reset the password'
+  }
+}
+
+async function doResetMfa(u: AdminUser) {
+  if (!window.confirm(`Remove the authenticator for ${u.email}? They will set it up again at next sign-in.`)) return
+  actionError.value = null
+  try {
+    await admin.resetMfa(u.id)
+  } catch (err) {
+    actionError.value = err instanceof ApiError ? err.message : 'Unable to reset MFA'
+  }
+}
+
+async function copyResetPassword() {
+  if (!resetResult.value) return
+  try {
+    await navigator.clipboard.writeText(resetResult.value.temporaryPassword)
+    resetCopied.value = true
+    setTimeout(() => (resetCopied.value = false), 1500)
+  } catch {
+    // Clipboard may be blocked; the password remains visible to copy by hand.
+  }
+}
+
+function closeResetResult() {
+  resetResult.value = null
+  resetCopied.value = false
 }
 
 function onCreated() {
@@ -104,18 +149,19 @@ function toggleRole(list: string[], roleId: string) {
             <th>Roles</th>
             <th>Organization</th>
             <th>Status</th>
+            <th>MFA</th>
             <th>Last login</th>
-            <th v-if="auth.hasPermission('users:update')" />
+            <th v-if="canManageUsers" />
           </tr>
         </thead>
         <tbody>
           <tr v-if="admin.loading">
-            <td colspan="7" class="py-8 text-center text-slate-500">
+            <td colspan="8" class="py-8 text-center text-slate-500">
               <Loader2 class="mx-auto h-5 w-5 animate-spin" />
             </td>
           </tr>
           <tr v-else-if="admin.users.length === 0">
-            <td colspan="7" class="py-8 text-center text-slate-500">No user accounts yet.</td>
+            <td colspan="8" class="py-8 text-center text-slate-500">No user accounts yet.</td>
           </tr>
           <tr v-for="u in admin.users" :key="u.id">
             <td class="font-medium text-slate-900">{{ u.firstName }} {{ u.lastName }}</td>
@@ -129,19 +175,75 @@ function toggleRole(list: string[], roleId: string) {
             <td class="text-slate-500">{{ u.organization?.name ?? '—' }}</td>
             <td>
               <span class="badge" :class="statusBadgeClass(u.status)">{{ u.status }}</span>
+              <span v-if="u.mustChangePassword" class="badge badge-warning ml-1">Change pending</span>
+            </td>
+            <td>
+              <span class="badge" :class="u.mfaEnabled ? 'badge-success' : 'badge-neutral'">
+                {{ u.mfaEnabled ? 'Enabled' : 'Not enabled' }}
+              </span>
             </td>
             <td class="text-slate-500">
               {{ u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : 'Never' }}
             </td>
-            <td v-if="auth.hasPermission('users:update')">
-              <button type="button" class="btn btn-ghost btn-sm" @click="openEdit(u)">
-                <Pencil class="h-3.5 w-3.5" />
-                Manage
-              </button>
+            <td v-if="canManageUsers">
+              <div class="flex flex-wrap justify-end gap-1">
+                <button type="button" class="btn btn-ghost btn-sm" @click="openEdit(u)">
+                  <Pencil class="h-3.5 w-3.5" />
+                  Manage
+                </button>
+                <button
+                  v-if="auth.hasPermission('users:reset_password') && u.id !== auth.user?.sub"
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  @click="doResetPassword(u)"
+                >
+                  <KeyRound class="h-3.5 w-3.5" />
+                  Reset password
+                </button>
+                <button
+                  v-if="auth.hasPermission('users:reset_mfa') && u.id !== auth.user?.sub && u.mfaEnabled"
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  @click="doResetMfa(u)"
+                >
+                  <ShieldOff class="h-3.5 w-3.5" />
+                  Reset MFA
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <p v-if="actionError" class="alert-error mt-4" role="alert">{{ actionError }}</p>
+
+    <!-- One-time temporary password -->
+    <div
+      v-if="resetResult"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="reset-title"
+    >
+      <div class="card w-full max-w-md p-6">
+        <h2 id="reset-title" class="section-title">Temporary password issued</h2>
+        <p class="mt-2 text-sm text-slate-600">
+          Share this with <span class="font-medium">{{ resetResult.email }}</span> through a secure channel. It is shown
+          only now. They must choose a new password at their next sign-in.
+        </p>
+        <div class="mt-4 flex items-center gap-2">
+          <code class="flex-1 break-all rounded-md bg-slate-100 px-3 py-2 text-sm">{{ resetResult.temporaryPassword }}</code>
+          <button type="button" class="btn btn-secondary btn-sm" @click="copyResetPassword">
+            <Check v-if="resetCopied" class="h-3.5 w-3.5 text-emerald-600" />
+            <Copy v-else class="h-3.5 w-3.5" />
+            {{ resetCopied ? 'Copied' : 'Copy' }}
+          </button>
+        </div>
+        <div class="mt-6 flex justify-end">
+          <button type="button" class="btn btn-primary" @click="closeResetResult">Done</button>
+        </div>
+      </div>
     </div>
 
     <UserCreateWizard

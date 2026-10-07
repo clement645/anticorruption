@@ -1,6 +1,8 @@
 import {
   Body,
   Controller,
+  HttpCode,
+  HttpStatus,
   Get,
   Param,
   Patch,
@@ -166,6 +168,36 @@ export class UsersController {
     });
 
     return result;
+  }
+
+  @Post(':id/password/reset')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('users:reset_password')
+  @RequireStepUp()
+  async resetPassword(
+    @Param('id') id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Req() req: Request,
+  ) {
+    return this.usersService.resetPassword(id, actor, {
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
+  @Post(':id/mfa/reset')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermissions('users:reset_mfa')
+  @RequireStepUp()
+  async resetMfa(
+    @Param('id') id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Req() req: Request,
+  ) {
+    await this.usersService.resetMfa(id, actor, {
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   @Get('me/security')

@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
+import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import type { CreateUserDto } from '../dto/create-user.dto';
@@ -86,15 +87,18 @@ export class UsersService {
           department: { select: { id: true, name: true } },
           lastLoginAt: true,
           createdAt: true,
+          mustChangePassword: true,
           roles: { select: { role: { select: { id: true, name: true } } } },
+          mfaMethods: { where: { type: 'TOTP' }, select: { enabled: true } },
         },
       }),
       this.prisma.user.count(),
     ]);
     return {
-      items: items.map((item) => ({
+      items: items.map(({ mfaMethods, roles, ...item }) => ({
         ...item,
-        roles: item.roles.map((ur) => ur.role),
+        roles: roles.map((ur) => ur.role),
+        mfaEnabled: mfaMethods.some((m) => m.enabled),
       })),
       total,
     };
@@ -147,6 +151,10 @@ export class UsersService {
       }
     }
 
+    if (dto.status === UserStatusDto.SUSPENDED) {
+      await this.revokeSessions(id, 'account_suspended');
+    }
+
     return this.prisma.$transaction(async (tx) => {
       if (dto.roleIds) {
         await tx.userRole.deleteMany({ where: { userId: id } });
@@ -175,6 +183,118 @@ export class UsersService {
       });
 
       return { ...updated, roles: updated.roles.map((ur) => ur.role) };
+    });
+  }
+
+  /** Sets a new password hash. Used by the forced-change flow and by admin resets. */
+  async setPassword(
+    userId: string,
+    newPassword: string,
+    options: { mustChangePassword: boolean },
+  ): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash: await argon2.hash(newPassword, { type: argon2.argon2id }),
+        mustChangePassword: options.mustChangePassword,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+  }
+
+  /**
+   * Issues a one-time temporary password. It is returned to the administrator
+   * exactly once and never stored in readable form; the user must replace it
+   * at next sign-in, and every existing session is revoked.
+   */
+  async resetPassword(
+    id: string,
+    actor: UpdateActor,
+    requestMeta: RequestMeta,
+  ): Promise<{ temporaryPassword: string }> {
+    await this.findByIdOrThrow(id);
+    await this.assertNotSelf(id, actor, requestMeta, 'password_reset_self_denied');
+
+    const temporaryPassword = `Bp-${randomBytes(18).toString('base64url')}!`;
+    await this.setPassword(id, temporaryPassword, { mustChangePassword: true });
+    await this.revokeSessions(id, 'admin_password_reset');
+
+    await this.auditService.append({
+      eventType: 'PASSWORD_RESET_BY_ADMIN',
+      actorId: actor.sub,
+      actorEmail: actor.email,
+      organizationId: actor.organizationId ?? undefined,
+      resourceType: 'User',
+      resourceId: id,
+      action: 'reset_password',
+      payload: { targetUserId: id },
+      ipAddress: requestMeta.ipAddress,
+      userAgent: requestMeta.userAgent,
+    });
+    return { temporaryPassword };
+  }
+
+  /**
+   * Admin-assisted MFA reset: removes the authenticator and its backup codes so the
+   * user can enrol again. Sessions are revoked so the change takes effect immediately.
+   */
+  async resetMfa(
+    id: string,
+    actor: UpdateActor,
+    requestMeta: RequestMeta,
+  ): Promise<void> {
+    await this.findByIdOrThrow(id);
+    await this.assertNotSelf(id, actor, requestMeta, 'mfa_reset_self_denied');
+
+    await this.prisma.mfaMethod.deleteMany({ where: { userId: id } });
+    await this.revokeSessions(id, 'admin_mfa_reset');
+
+    await this.auditService.append({
+      eventType: 'MFA_RESET_BY_ADMIN',
+      actorId: actor.sub,
+      actorEmail: actor.email,
+      organizationId: actor.organizationId ?? undefined,
+      resourceType: 'User',
+      resourceId: id,
+      action: 'reset_mfa',
+      payload: { targetUserId: id },
+      ipAddress: requestMeta.ipAddress,
+      userAgent: requestMeta.userAgent,
+    });
+    await this.prisma.securityEvent.create({
+      data: { type: 'MFA_RESET', userId: id, metadata: { byAdministrator: true } },
+    });
+  }
+
+  private async assertNotSelf(
+    id: string,
+    actor: UpdateActor,
+    requestMeta: RequestMeta,
+    reason: string,
+  ): Promise<void> {
+    if (id !== actor.sub) return;
+    await this.auditService
+      .append({
+        eventType: 'AUTHORIZATION_DENIED',
+        actorId: actor.sub,
+        actorEmail: actor.email,
+        organizationId: actor.organizationId ?? undefined,
+        resourceType: 'User',
+        resourceId: id,
+        action: reason,
+        payload: { reason },
+        ipAddress: requestMeta.ipAddress,
+        userAgent: requestMeta.userAgent,
+      })
+      .catch(() => undefined);
+    throw new ForbiddenException('Use your own account settings for this, not an administrative action');
+  }
+
+  private async revokeSessions(userId: string, reason: string): Promise<void> {
+    await this.prisma.session.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date(), revokedReason: reason },
     });
   }
 

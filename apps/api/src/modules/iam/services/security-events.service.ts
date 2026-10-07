@@ -16,7 +16,9 @@ export type SecurityEventType =
   | 'USER_CREATED'
   | 'USER_UPDATED'
   | 'SIGNING_KEY_ENROLLED'
-  | 'AUTHORIZATION_DENIED';
+  | 'AUTHORIZATION_DENIED'
+  | 'PASSWORD_CHANGED'
+  | 'MFA_RESET';
 
 interface RecordEventInput {
   type: SecurityEventType;

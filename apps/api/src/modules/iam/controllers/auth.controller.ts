@@ -15,6 +15,7 @@ import { AuthService } from '../services/auth.service';
 import { StepUpService } from '../services/step-up.service';
 import { LoginDto } from '../dto/login.dto';
 import { VerifyMfaDto } from '../dto/verify-mfa.dto';
+import { ChangeForcedPasswordDto } from '../dto/change-password.dto';
 import { StepUpDto } from '../dto/step-up.dto';
 import { Public } from '../decorators/public.decorator';
 import { CurrentUser } from '../decorators/current-user.decorator';
@@ -58,9 +59,27 @@ export class AuthController {
     if (result.status === 'mfa_required') {
       return { mfaRequired: true, mfaToken: result.mfaToken };
     }
+    if (result.status === 'password_change_required') {
+      return { passwordChangeRequired: true, changeToken: result.changeToken };
+    }
 
     this.setRefreshCookie(res, result.tokens);
     return this.toLoginResponse(result.tokens);
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('password/change')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async changeForcedPassword(
+    @Body() dto: ChangeForcedPasswordDto,
+    @Req() req: Request,
+  ) {
+    await this.authService.changeForcedPassword(
+      dto.changeToken,
+      dto.newPassword,
+      this.requestMeta(req),
+    );
   }
 
   @Public()

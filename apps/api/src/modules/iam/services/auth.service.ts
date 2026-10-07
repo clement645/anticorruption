@@ -20,10 +20,13 @@ interface RequestMeta {
 
 export type LoginResult =
   | { status: 'authenticated'; tokens: IssuedTokens }
-  | { status: 'mfa_required'; mfaToken: string };
+  | { status: 'mfa_required'; mfaToken: string }
+  | { status: 'password_change_required'; changeToken: string };
 
 const MFA_TOKEN_PURPOSE = 'mfa_pending';
 const MFA_TOKEN_TTL_SECONDS = 300;
+const PASSWORD_CHANGE_PURPOSE = 'password_change';
+const PASSWORD_CHANGE_TTL_SECONDS = 600;
 
 @Injectable()
 export class AuthService {
@@ -94,6 +97,14 @@ export class AuthService {
         userAgent: meta.userAgent,
       });
       throw new UnauthorizedException('Invalid email or password');
+    }
+
+    if (user.mustChangePassword) {
+      const changeToken = this.jwt.sign(
+        { sub: user.id, purpose: PASSWORD_CHANGE_PURPOSE },
+        { expiresIn: PASSWORD_CHANGE_TTL_SECONDS },
+      );
+      return { status: 'password_change_required', changeToken };
     }
 
     const mfaEnabled = await this.mfa.isMfaEnabled(user.id);
@@ -211,6 +222,48 @@ export class AuthService {
       userAgent: meta.userAgent,
     });
     return this.tokens.issueSession(this.users.toJwtPayload(user), meta);
+  }
+
+  /**
+   * Completes a forced password change. The change token is single-purpose and
+   * short-lived; it grants nothing except this one operation. On success every
+   * existing session is revoked, so the user signs in again with the new password.
+   */
+  async changeForcedPassword(
+    changeToken: string,
+    newPassword: string,
+    meta: RequestMeta,
+  ): Promise<void> {
+    const userId = this.verifyPasswordChangeToken(changeToken);
+    const user = await this.users.findByIdWithRoles(userId);
+    if (!user || !user.mustChangePassword) {
+      throw new UnauthorizedException('This password change is no longer required');
+    }
+    if (user.status === 'SUSPENDED') {
+      throw new ForbiddenException('This account has been suspended');
+    }
+
+    await this.users.setPassword(userId, newPassword, { mustChangePassword: false });
+    await this.tokens.revokeAllSessionsForUser(userId, 'password_changed');
+    await this.securityEvents.record({
+      type: 'PASSWORD_CHANGED',
+      userId,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    });
+  }
+
+  private verifyPasswordChangeToken(changeToken: string): string {
+    try {
+      const payload = this.jwt.verify<{ sub: string; purpose: string }>(changeToken);
+      if (payload.purpose !== PASSWORD_CHANGE_PURPOSE) {
+        throw new Error('wrong purpose');
+      }
+      return payload.sub;
+    } catch (error) {
+      this.logger.warn('Rejected invalid or expired password change token', error);
+      throw new UnauthorizedException('Your password change has expired — please sign in again');
+    }
   }
 
   private verifyMfaToken(mfaToken: string): string {
