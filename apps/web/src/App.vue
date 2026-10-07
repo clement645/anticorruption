@@ -1,300 +1,42 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import {
-  LayoutDashboard,
-  Wallet,
-  Gavel,
-  FileText,
-  FolderKanban,
-  ShieldAlert,
-  ClipboardList,
-  ShieldCheck,
-  MessageSquareWarning,
-  UserCog,
-  Eye,
-  Megaphone,
-  Menu,
-  X,
-  ChevronDown,
-  LogOut,
-  KeyRound,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Shield,
-} from '@lucide/vue'
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import StepUpChallengeModal from './components/StepUpChallengeModal.vue'
+import AppSidebar from './layouts/AppSidebar.vue'
+import AppTopbar from './layouts/AppTopbar.vue'
+import CommandPalette from './layouts/CommandPalette.vue'
+import { useShell, useShellShortcuts } from './layouts/useShell'
 
 const appName = import.meta.env.VITE_APP_NAME ?? 'B-PFMPS'
 const auth = useAuthStore()
-const router = useRouter()
 const route = useRoute()
+const { drawerOpen } = useShell()
 
-const sidebarOpen = ref(false)
-const userMenuOpen = ref(false)
+useShellShortcuts(() => auth.isAuthenticated)
 
-const SIDEBAR_KEY = 'bpfmps.sidebarCollapsed'
-const sidebarCollapsed = ref(readSidebarPreference())
-
-function readSidebarPreference(): boolean {
-  try {
-    return localStorage.getItem(SIDEBAR_KEY) === 'true'
-  } catch {
-    return false
-  }
-}
-
-function toggleSidebar() {
-  sidebarCollapsed.value = !sidebarCollapsed.value
-  try {
-    localStorage.setItem(SIDEBAR_KEY, String(sidebarCollapsed.value))
-  } catch {
-    // Storage can be unavailable (private mode); the preference then lasts for this page only.
-  }
-}
-
-// Labels hide only on desktop widths, so the mobile drawer is unaffected.
-const labelClass = computed(() => (sidebarCollapsed.value ? 'lg:hidden' : ''))
-
-interface NavItem {
-  to: string
-  label: string
-  icon: typeof LayoutDashboard
-  permission?: string
-}
-interface NavGroup {
-  label: string
-  items: NavItem[]
-}
-
-const navGroups = computed<NavGroup[]>(() => [
-  {
-    label: 'Overview',
-    items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard }],
-  },
-  {
-    label: 'Financial Management',
-    items: [
-      { to: '/budgets', label: 'Budgets', icon: Wallet, permission: 'budget:read' },
-      { to: '/contracts', label: 'Contracts & Payments', icon: FileText, permission: 'contract:read' },
-    ],
-  },
-  {
-    label: 'Procurement & Delivery',
-    items: [
-      { to: '/procurement', label: 'Procurement', icon: Gavel, permission: 'procurement:read' },
-      { to: '/projects', label: 'Projects', icon: FolderKanban, permission: 'project:read' },
-    ],
-  },
-  {
-    label: 'Oversight',
-    items: [
-      { to: '/risk-alerts', label: 'Risk Alerts', icon: ShieldAlert, permission: 'risk:read' },
-      { to: '/audit', label: 'Audit Trail', icon: ClipboardList, permission: 'audit:read' },
-      { to: '/auditor-portal', label: 'Auditor Portal', icon: ShieldCheck, permission: 'audit:read' },
-      {
-        to: '/whistleblower-investigations',
-        label: 'Whistleblower Cases',
-        icon: MessageSquareWarning,
-        permission: 'whistleblower:read',
-      },
-    ],
-  },
-  {
-    label: 'Administration',
-    items: [
-      { to: '/admin/users', label: 'User Management', icon: UserCog, permission: 'users:read' },
-      { to: '/admin/roles', label: 'Roles & Permissions', icon: Shield, permission: 'roles:read' },
-    ],
-  },
-])
-
-const visibleGroups = computed(() =>
-  navGroups.value
-    .map((group) => ({
-      ...group,
-      items: group.items.filter((item) => !item.permission || auth.hasPermission(item.permission)),
-    }))
-    .filter((group) => group.items.length > 0),
-)
-
-const initials = computed(() => {
-  const email = auth.user?.email ?? ''
-  return email.slice(0, 2).toUpperCase()
-})
-
-function isActive(to: string) {
-  return to === '/' ? route.path === '/' : route.path.startsWith(to)
-}
-
-async function handleLogout() {
-  userMenuOpen.value = false
-  await auth.logout()
-  await router.push('/login')
-}
+const showShell = computed(() => auth.isAuthenticated)
 </script>
 
 <template>
-  <div v-if="auth.isAuthenticated" class="flex min-h-screen bg-slate-50">
-    <!-- Mobile overlay -->
+  <div v-if="showShell" class="flex min-h-screen bg-slate-50">
     <div
-      v-if="sidebarOpen"
+      v-if="drawerOpen"
       class="fixed inset-0 z-30 bg-slate-900/40 lg:hidden"
-      @click="sidebarOpen = false"
+      aria-hidden="true"
+      @click="drawerOpen = false"
     />
 
-    <!-- Sidebar -->
-    <aside
-      class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-200 bg-white transition-[transform,width] duration-200 lg:static lg:translate-x-0"
-      :class="[sidebarOpen ? 'translate-x-0' : '-translate-x-full', sidebarCollapsed ? 'lg:w-16' : 'lg:w-64']"
-    >
-      <div class="flex h-16 flex-none items-center gap-2.5 border-b border-slate-200 px-5">
-        <div
-          class="flex h-8 w-8 flex-none items-center justify-center rounded-md bg-brand-800 font-serif text-sm font-bold text-white shadow-sm"
-        >
-          B
-        </div>
-        <div class="min-w-0" :class="labelClass">
-          <span class="block truncate text-sm font-semibold tracking-tight text-slate-900">{{ appName }}</span>
-          <span class="block text-[10px] font-medium uppercase tracking-wider text-accent-600">Republic of Kenya</span>
-        </div>
-      </div>
+    <AppSidebar />
 
-      <nav class="flex-1 overflow-y-auto px-3 py-4">
-        <div v-for="group in visibleGroups" :key="group.label" class="mb-5">
-          <p
-            class="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400"
-            :class="labelClass"
-          >
-            {{ group.label }}
-          </p>
-          <router-link
-            v-for="item in group.items"
-            :key="item.to"
-            :to="item.to"
-            class="mb-0.5 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors"
-            :class="
-              isActive(item.to)
-                ? 'bg-brand-50 text-brand-800'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-            "
-            :title="item.label"
-            @click="sidebarOpen = false"
-          >
-            <component
-              :is="item.icon"
-              class="h-[18px] w-[18px] flex-none"
-              :class="isActive(item.to) ? 'text-brand-700' : 'text-slate-400'"
-            />
-            <span class="truncate" :class="labelClass">{{ item.label }}</span>
-          </router-link>
-        </div>
-
-        <div class="mt-2 border-t border-slate-100 pt-4">
-          <p class="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400" :class="labelClass">Public</p>
-          <router-link
-            to="/transparency"
-            class="mb-0.5 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
-          >
-            <Eye class="h-[18px] w-[18px] flex-none text-slate-400" />
-            <span :class="labelClass">Transparency Portal</span>
-          </router-link>
-          <router-link
-            to="/report-a-concern"
-            class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
-          >
-            <Megaphone class="h-[18px] w-[18px] flex-none text-slate-400" />
-            <span :class="labelClass">Report a Concern</span>
-          </router-link>
-        </div>
-      </nav>
-
-      <div class="hidden flex-none border-t border-slate-200 p-3 lg:block">
-        <button
-          type="button"
-          class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-          :title="sidebarCollapsed ? 'Expand menu' : 'Collapse menu'"
-          @click="toggleSidebar"
-        >
-          <PanelLeftOpen v-if="sidebarCollapsed" class="h-[18px] w-[18px] flex-none text-slate-400" />
-          <PanelLeftClose v-else class="h-[18px] w-[18px] flex-none text-slate-400" />
-          <span :class="labelClass">Collapse menu</span>
-        </button>
-      </div>
-    </aside>
-
-    <!-- Main column -->
-    <div class="flex min-h-screen flex-1 flex-col lg:pl-0">
-      <header class="sticky top-0 z-20 flex h-16 flex-none items-center justify-between border-b border-slate-200 bg-white/85 px-4 backdrop-blur sm:px-6">
-        <button
-          type="button"
-          class="rounded-md p-2 text-slate-500 hover:bg-slate-100 lg:hidden"
-          @click="sidebarOpen = !sidebarOpen"
-        >
-          <Menu v-if="!sidebarOpen" class="h-5 w-5" />
-          <X v-else class="h-5 w-5" />
-        </button>
-        <div class="hidden items-center gap-2 text-sm text-slate-400 lg:flex">
-          <span class="h-1.5 w-1.5 rounded-full bg-accent-500" aria-hidden="true" />
-          Blockchain-Based Integrated Public Financial Management &amp; Procurement System
-        </div>
-
-        <div class="relative ml-auto">
-          <button
-            type="button"
-            class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-100"
-            @click="userMenuOpen = !userMenuOpen"
-          >
-            <span class="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-800">
-              {{ initials }}
-            </span>
-            <span class="hidden text-left sm:block">
-              <span class="block text-sm font-medium text-slate-900">{{ auth.user?.email }}</span>
-              <span class="block text-xs text-slate-500">{{ auth.user?.roles.join(', ') || '—' }}</span>
-            </span>
-            <ChevronDown class="hidden h-4 w-4 text-slate-400 sm:block" />
-          </button>
-
-          <div
-            v-if="userMenuOpen"
-            class="absolute right-0 z-30 mt-2 w-48 rounded-lg border border-slate-200 bg-white py-1 shadow-lg shadow-slate-900/10"
-            @click="userMenuOpen = false"
-          >
-            <div class="border-b border-slate-100 px-3 py-2 sm:hidden">
-              <p class="truncate text-sm font-medium text-slate-900">{{ auth.user?.email }}</p>
-              <p class="text-xs text-slate-500">{{ auth.user?.roles.join(', ') || '—' }}</p>
-            </div>
-            <router-link
-              to="/settings/security"
-              class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
-            >
-              <ShieldCheck class="h-4 w-4" />
-              Security
-            </router-link>
-            <router-link
-              to="/settings/signing-key"
-              class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
-            >
-              <KeyRound class="h-4 w-4" />
-              Signing key
-            </router-link>
-            <button
-              type="button"
-              class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
-              @click="handleLogout"
-            >
-              <LogOut class="h-4 w-4" />
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main class="flex-1">
-        <router-view />
+    <div class="flex min-h-screen min-w-0 flex-1 flex-col">
+      <AppTopbar />
+      <main id="main" class="flex-1" tabindex="-1">
+        <router-view :key="route.fullPath" />
       </main>
     </div>
+
+    <CommandPalette />
     <StepUpChallengeModal />
   </div>
 
