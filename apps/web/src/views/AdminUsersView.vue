@@ -6,6 +6,13 @@ import { useAuthStore } from '../stores/auth'
 import { useAdminStore, type AdminUser } from '../stores/admin'
 import { ApiError } from '../api/client'
 import UserCreateWizard from '../components/UserCreateWizard.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import SkeletonRows from '../components/ui/SkeletonRows.vue'
+import AlertBanner from '../components/ui/AlertBanner.vue'
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
+import { notify } from '../components/ui/toast'
 
 const auth = useAuthStore()
 const admin = useAdminStore()
@@ -25,19 +32,6 @@ onMounted(async () => {
   await Promise.all([admin.fetchUsers(), admin.fetchRoles(), admin.fetchOrganizations()])
 })
 
-function statusBadgeClass(status: AdminUser['status']) {
-  switch (status) {
-    case 'ACTIVE':
-      return 'badge-success'
-    case 'SUSPENDED':
-      return 'badge-danger'
-    case 'LOCKED':
-      return 'badge-warning'
-    default:
-      return 'badge-neutral'
-  }
-}
-
 function openCreate() {
   createOpen.value = true
 }
@@ -49,25 +43,40 @@ const resetResult = ref<{ email: string; temporaryPassword: string } | null>(nul
 const resetCopied = ref(false)
 const actionError = ref<string | null>(null)
 
-async function doResetPassword(u: AdminUser) {
-  if (!window.confirm(`Issue a new temporary password for ${u.email}? Their current sessions will end.`)) return
+type PendingAction = { kind: 'password' | 'mfa'; user: AdminUser } | null
+const pending = ref<PendingAction>(null)
+const working = ref(false)
+
+function askResetPassword(u: AdminUser) {
   actionError.value = null
-  try {
-    const result = await admin.resetPassword(u.id)
-    resetResult.value = { email: u.email, temporaryPassword: result.temporaryPassword }
-    await admin.fetchUsers()
-  } catch (err) {
-    actionError.value = err instanceof ApiError ? err.message : 'Unable to reset the password'
-  }
+  pending.value = { kind: 'password', user: u }
 }
 
-async function doResetMfa(u: AdminUser) {
-  if (!window.confirm(`Remove the authenticator for ${u.email}? They will set it up again at next sign-in.`)) return
+function askResetMfa(u: AdminUser) {
+  actionError.value = null
+  pending.value = { kind: 'mfa', user: u }
+}
+
+async function confirmPending() {
+  if (!pending.value) return
+  const { kind, user } = pending.value
+  working.value = true
   actionError.value = null
   try {
-    await admin.resetMfa(u.id)
+    if (kind === 'password') {
+      const result = await admin.resetPassword(user.id)
+      resetResult.value = { email: user.email, temporaryPassword: result.temporaryPassword }
+      await admin.fetchUsers()
+    } else {
+      await admin.resetMfa(user.id)
+      notify(`Authenticator removed for ${user.email}.`)
+    }
+    pending.value = null
   } catch (err) {
-    actionError.value = err instanceof ApiError ? err.message : 'Unable to reset MFA'
+    actionError.value = err instanceof ApiError ? err.message : 'That action did not complete. Nothing was changed.'
+    pending.value = null
+  } finally {
+    working.value = false
   }
 }
 
@@ -129,16 +138,17 @@ function toggleRole(list: string[], roleId: string) {
 
 <template>
   <section class="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-    <div class="page-header flex-row items-end justify-between">
-      <div>
-        <h1 class="page-title">User Management</h1>
-        <p class="page-subtitle">Create accounts and assign roles for staff, auditors, and oversight bodies.</p>
-      </div>
-      <button v-if="auth.hasPermission('users:create')" type="button" class="btn btn-primary" @click="openCreate">
-        <UserPlus class="h-4 w-4" />
-        New user
-      </button>
-    </div>
+    <PageHeader
+      title="Users"
+      subtitle="Create accounts, assign roles, and manage access for staff, auditors, and oversight bodies."
+    >
+      <template #actions>
+        <button v-if="auth.hasPermission('users:create')" type="button" class="btn btn-primary" @click="openCreate">
+          <UserPlus class="h-4 w-4" />
+          New user
+        </button>
+      </template>
+    </PageHeader>
 
     <div class="mt-6 table-shell">
       <table class="table-base">
@@ -157,11 +167,16 @@ function toggleRole(list: string[], roleId: string) {
         <tbody>
           <tr v-if="admin.loading">
             <td colspan="8" class="py-8 text-center text-slate-500">
-              <Loader2 class="mx-auto h-5 w-5 animate-spin" />
+              <SkeletonRows :rows="4" :columns="5" />
             </td>
           </tr>
           <tr v-else-if="admin.users.length === 0">
-            <td colspan="8" class="py-8 text-center text-slate-500">No user accounts yet.</td>
+            <td colspan="8" class="p-0">
+              <EmptyState
+                title="No user accounts yet"
+                description="Accounts you create will appear here, with their roles, MFA status, and last sign-in."
+              />
+            </td>
           </tr>
           <tr v-for="u in admin.users" :key="u.id">
             <td class="font-medium text-slate-900">{{ u.firstName }} {{ u.lastName }}</td>
@@ -174,11 +189,11 @@ function toggleRole(list: string[], roleId: string) {
             </td>
             <td class="text-slate-500">{{ u.organization?.name ?? '—' }}</td>
             <td>
-              <span class="badge" :class="statusBadgeClass(u.status)">{{ u.status }}</span>
+              <StatusBadge :status="u.status" />
               <span v-if="u.mustChangePassword" class="badge badge-warning ml-1">Change pending</span>
             </td>
             <td>
-              <span class="badge" :class="u.mfaEnabled ? 'badge-success' : 'badge-neutral'">
+              <span class="badge whitespace-nowrap" :class="u.mfaEnabled ? 'badge-success' : 'badge-neutral'">
                 {{ u.mfaEnabled ? 'Enabled' : 'Not enabled' }}
               </span>
             </td>
@@ -195,7 +210,7 @@ function toggleRole(list: string[], roleId: string) {
                   v-if="auth.hasPermission('users:reset_password') && u.id !== auth.user?.sub"
                   type="button"
                   class="btn btn-ghost btn-sm"
-                  @click="doResetPassword(u)"
+                  @click="askResetPassword(u)"
                 >
                   <KeyRound class="h-3.5 w-3.5" />
                   Reset password
@@ -204,7 +219,7 @@ function toggleRole(list: string[], roleId: string) {
                   v-if="auth.hasPermission('users:reset_mfa') && u.id !== auth.user?.sub && u.mfaEnabled"
                   type="button"
                   class="btn btn-ghost btn-sm"
-                  @click="doResetMfa(u)"
+                  @click="askResetMfa(u)"
                 >
                   <ShieldOff class="h-3.5 w-3.5" />
                   Reset MFA
@@ -216,7 +231,24 @@ function toggleRole(list: string[], roleId: string) {
       </table>
     </div>
 
-    <p v-if="actionError" class="alert-error mt-4" role="alert">{{ actionError }}</p>
+    <div v-if="actionError" class="mt-4">
+      <AlertBanner>{{ actionError }}</AlertBanner>
+    </div>
+
+    <ConfirmDialog
+      :open="pending !== null"
+      :title="pending?.kind === 'password' ? 'Issue a temporary password?' : 'Remove this authenticator?'"
+      :message="
+        pending?.kind === 'password'
+          ? `A new one-time password will be issued for ${pending?.user.email}. Their current sessions will end, and they must choose a new password at next sign-in.`
+          : `The authenticator for ${pending?.user.email} will be removed. They will set it up again at their next sign-in, and their current sessions will end.`
+      "
+      :confirm-label="pending?.kind === 'password' ? 'Issue password' : 'Remove authenticator'"
+      tone="danger"
+      :busy="working"
+      @confirm="confirmPending"
+      @cancel="pending = null"
+    />
 
     <!-- One-time temporary password -->
     <div

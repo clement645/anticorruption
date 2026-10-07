@@ -7,6 +7,7 @@ import AppSidebar from './layouts/AppSidebar.vue'
 import AppTopbar from './layouts/AppTopbar.vue'
 import CommandPalette from './layouts/CommandPalette.vue'
 import { useShell, useShellShortcuts } from './layouts/useShell'
+import ToastRegion from './components/ui/ToastRegion.vue'
 
 const appName = import.meta.env.VITE_APP_NAME ?? 'B-PFMPS'
 const auth = useAuthStore()
@@ -38,6 +39,7 @@ const showShell = computed(() => auth.isAuthenticated)
 
     <CommandPalette />
     <StepUpChallengeModal />
+    <ToastRegion />
   </div>
 
   <!-- Unauthenticated / public shell -->

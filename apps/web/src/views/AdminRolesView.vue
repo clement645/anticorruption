@@ -8,6 +8,12 @@ import {
   type AdminRoleDetail,
 } from '../stores/admin'
 import { ApiError } from '../api/client'
+import PageHeader from '../components/ui/PageHeader.vue'
+import AlertBanner from '../components/ui/AlertBanner.vue'
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import SkeletonRows from '../components/ui/SkeletonRows.vue'
+import { notify } from '../components/ui/toast'
 
 const auth = useAuthStore()
 const admin = useAdminStore()
@@ -126,6 +132,7 @@ async function save() {
       await load()
       selectedId.value = created.id
       mode.value = 'view'
+      notify(`Role “${created.name}” created.`)
     } else if (selectedRole.value) {
       await admin.updateRole(selectedRole.value.id, {
         name: form.value.name.trim(),
@@ -134,6 +141,7 @@ async function save() {
       })
       await load()
       mode.value = 'view'
+      notify('Role saved.')
     }
   } catch (err) {
     formError.value = errorMessage(err)
@@ -142,16 +150,29 @@ async function save() {
   }
 }
 
-async function remove() {
+const confirmDelete = ref(false)
+const deleting = ref(false)
+
+function remove() {
   if (!selectedRole.value) return
-  if (!window.confirm(`Delete the role "${selectedRole.value.name}"? This cannot be undone.`)) return
   formError.value = null
+  confirmDelete.value = true
+}
+
+async function performDelete() {
+  if (!selectedRole.value) return
+  deleting.value = true
   try {
+    const name = selectedRole.value.name
     await admin.deleteRole(selectedRole.value.id)
     selectedId.value = null
     await load()
+    notify(`Role “${name}” deleted.`)
   } catch (err) {
-    loadError.value = errorMessage(err)
+    formError.value = errorMessage(err)
+  } finally {
+    deleting.value = false
+    confirmDelete.value = false
   }
 }
 
@@ -160,25 +181,31 @@ onMounted(load)
 
 <template>
   <div class="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-    <div class="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 class="page-title">Roles &amp; Permissions</h1>
-        <p class="page-subtitle">
-          Define what each role can do. You can only grant permissions you hold yourself.
-        </p>
-      </div>
-      <button v-if="auth.hasPermission('roles:manage')" type="button" class="btn btn-primary" @click="startCreate">
-        <Plus class="h-4 w-4" />
-        New role
-      </button>
-    </div>
+    <PageHeader
+      title="Roles & permissions"
+      subtitle="Define what each role can do. You can only grant permissions you hold yourself."
+    >
+      <template #actions>
+        <button v-if="auth.hasPermission('roles:manage')" type="button" class="btn btn-primary" @click="startCreate">
+          <Plus class="h-4 w-4" />
+          New role
+        </button>
+      </template>
+    </PageHeader>
 
-    <p v-if="loadError" class="alert-error mb-4" role="alert">{{ loadError }}</p>
+    <div v-if="loadError" class="mb-4">
+      <AlertBanner>{{ loadError }}</AlertBanner>
+    </div>
 
     <div class="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
       <!-- Role list -->
       <section class="card p-0">
-        <div v-if="loading" class="p-6 text-sm text-slate-500">Loading roles…</div>
+        <SkeletonRows v-if="loading" :rows="6" :columns="1" />
+        <EmptyState
+          v-else-if="roles.length === 0"
+          title="No roles yet"
+          description="Create a role to group the permissions people need for their work."
+        />
         <ul v-else class="divide-y divide-slate-100">
           <li v-for="role in roles" :key="role.id">
             <button
@@ -246,7 +273,7 @@ onMounted(load)
             </div>
           </fieldset>
 
-          <p v-if="formError" class="alert-error" role="alert">{{ formError }}</p>
+          <AlertBanner v-if="formError">{{ formError }}</AlertBanner>
 
           <div class="flex justify-end gap-2">
             <button type="submit" class="btn btn-primary" :disabled="saving">
@@ -299,7 +326,7 @@ onMounted(load)
             >{{ key }}</span>
             <span v-if="selectedRole.permissions.length === 0" class="text-sm text-slate-400">No permissions</span>
           </div>
-          <p v-if="formError" class="alert-error" role="alert">{{ formError }}</p>
+          <AlertBanner v-if="formError">{{ formError }}</AlertBanner>
         </div>
 
         <div v-else class="py-12 text-center text-sm text-slate-500">
@@ -307,5 +334,16 @@ onMounted(load)
         </div>
       </section>
     </div>
+
+    <ConfirmDialog
+      :open="confirmDelete"
+      title="Delete this role?"
+      :message="`The role “${selectedRole?.name}” will be removed. Roles still assigned to people cannot be deleted, and this cannot be undone.`"
+      confirm-label="Delete role"
+      tone="danger"
+      :busy="deleting"
+      @confirm="performDelete"
+      @cancel="confirmDelete = false"
+    />
   </div>
 </template>
