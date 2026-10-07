@@ -23,6 +23,14 @@ describe('status registry', () => {
     expect(statusFor('ISSUED').tone).toBe('success')
     expect(statusFor('CANCELLED').tone).toBe('danger')
   })
+
+  it('maps the project, milestone, and inspection statuses introduced by the project-verification screen', () => {
+    expect(statusFor('PLANNED').tone).toBe('neutral')
+    expect(statusFor('IN_PROGRESS').tone).toBe('info')
+    expect(statusFor('PASSED').tone).toBe('success')
+    expect(statusFor('FAILED').tone).toBe('danger')
+    expect(statusFor('NEEDS_REVISION').tone).toBe('warning')
+  })
 })
 
 describe('StatusBadge', () => {

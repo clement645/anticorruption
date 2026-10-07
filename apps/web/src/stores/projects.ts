@@ -55,6 +55,9 @@ interface ProjectsState {
   milestones: Milestone[]
   inspectionsByMilestone: Record<string, Inspection[]>
   evidence: ProjectEvidence[]
+  projectsLoading: boolean
+  milestonesLoading: boolean
+  evidenceLoading: boolean
   error: string | null
 }
 
@@ -64,11 +67,21 @@ export const useProjectsStore = defineStore('projects', {
     milestones: [],
     inspectionsByMilestone: {},
     evidence: [],
+    projectsLoading: false,
+    milestonesLoading: false,
+    evidenceLoading: false,
     error: null,
   }),
   actions: {
     async fetchProjects() {
-      this.projects = await apiGet<Project[]>('/projects')
+      this.projectsLoading = true
+      try {
+        this.projects = await apiGet<Project[]>('/projects')
+      } catch {
+        this.error = 'Unable to load projects'
+      } finally {
+        this.projectsLoading = false
+      }
     },
     async createProject(
       contractId: string,
@@ -86,25 +99,48 @@ export const useProjectsStore = defineStore('projects', {
       }
     },
     async activateProject(id: string) {
-      await apiPost(`/projects/${id}/activate`)
-      await this.fetchProjects()
+      try {
+        await apiPost(`/projects/${id}/activate`)
+        await this.fetchProjects()
+      } catch {
+        this.error = 'Unable to activate the project'
+      }
     },
     async suspendProject(id: string) {
-      await apiPost(`/projects/${id}/suspend`)
-      await this.fetchProjects()
+      try {
+        await apiPost(`/projects/${id}/suspend`)
+        await this.fetchProjects()
+      } catch {
+        this.error = 'Unable to suspend the project'
+      }
     },
     async resumeProject(id: string) {
-      await apiPost(`/projects/${id}/resume`)
-      await this.fetchProjects()
+      try {
+        await apiPost(`/projects/${id}/resume`)
+        await this.fetchProjects()
+      } catch {
+        this.error = 'Unable to resume the project'
+      }
     },
     async cancelProject(id: string) {
-      await apiPost(`/projects/${id}/cancel`)
-      await this.fetchProjects()
+      try {
+        await apiPost(`/projects/${id}/cancel`)
+        await this.fetchProjects()
+      } catch {
+        this.error = 'Unable to cancel the project'
+      }
     },
 
     async fetchMilestones(projectId?: string) {
-      const query = projectId ? `?projectId=${projectId}` : ''
-      this.milestones = await apiGet<Milestone[]>(`/milestones${query}`)
+      this.milestonesLoading = true
+      try {
+        const query = projectId ? `?projectId=${projectId}` : ''
+        this.milestones = await apiGet<Milestone[]>(`/milestones${query}`)
+      } catch {
+        this.error = 'Unable to load milestones'
+      } finally {
+        this.milestonesLoading = false
+      }
     },
     async createMilestone(
       projectId: string,
@@ -129,12 +165,20 @@ export const useProjectsStore = defineStore('projects', {
       }
     },
     async startMilestone(id: string, projectId: string) {
-      await apiPost(`/milestones/${id}/start`)
-      await this.fetchMilestones(projectId)
+      try {
+        await apiPost(`/milestones/${id}/start`)
+        await this.fetchMilestones(projectId)
+      } catch {
+        this.error = 'Unable to start the milestone'
+      }
     },
     async completeMilestone(id: string, projectId: string) {
-      await apiPost(`/milestones/${id}/complete`)
-      await this.fetchMilestones(projectId)
+      try {
+        await apiPost(`/milestones/${id}/complete`)
+        await this.fetchMilestones(projectId)
+      } catch {
+        this.error = 'Unable to mark the milestone completed'
+      }
     },
 
     async fetchInspections(milestoneId: string) {
@@ -155,7 +199,14 @@ export const useProjectsStore = defineStore('projects', {
     },
 
     async fetchEvidence(projectId: string) {
-      this.evidence = await apiGet<ProjectEvidence[]>(`/projects/${projectId}/evidence`)
+      this.evidenceLoading = true
+      try {
+        this.evidence = await apiGet<ProjectEvidence[]>(`/projects/${projectId}/evidence`)
+      } catch {
+        this.error = 'Unable to load evidence'
+      } finally {
+        this.evidenceLoading = false
+      }
     },
     async uploadEvidence(
       projectId: string,
