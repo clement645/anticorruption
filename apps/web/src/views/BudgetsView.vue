@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
-import { useBudgetStore } from '../stores/budget'
+import { useBudgetStore, type Budget } from '../stores/budget'
 import { useSigningKeyStore } from '../stores/signingKey'
-import { apiGet } from '../api/client'
+import { apiGet, ApiError } from '../api/client'
+import { money } from '../lib/money'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import AlertBanner from '../components/ui/AlertBanner.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
+import { notify } from '../components/ui/toast'
 
 interface Organization {
   id: string
@@ -50,6 +57,7 @@ async function handleCreateFiscalYear() {
   formError.value = null
   try {
     await budget.createFiscalYear(newFiscalYear.name, newFiscalYear.startDate, newFiscalYear.endDate)
+    notify(`Fiscal year “${newFiscalYear.name}” created.`)
     newFiscalYear.name = ''
     newFiscalYear.startDate = ''
     newFiscalYear.endDate = ''
@@ -67,6 +75,7 @@ async function handleCreateBudget() {
       newBudget.name,
       newBudget.lines,
     )
+    notify(`Budget “${newBudget.name}” created.`)
     newBudget.name = ''
     newBudget.lines = [
       { code: '', voteCode: '', voteName: '', programName: '', description: '', authorizedAmount: 0 },
@@ -81,21 +90,43 @@ function commitFormFor(allocationId: string) {
   return commitForm[allocationId]
 }
 
-async function handleApprove(budgetId: string) {
+type PendingBudgetAction = { kind: 'approve' | 'reject'; budget: Budget } | null
+const pendingAction = ref<PendingBudgetAction>(null)
+const rejectReason = ref('')
+const actionBusy = ref(false)
+
+function askApprove(b: Budget) {
+  pendingAction.value = { kind: 'approve', budget: b }
+}
+function askReject(b: Budget) {
+  rejectReason.value = ''
+  pendingAction.value = { kind: 'reject', budget: b }
+}
+
+async function confirmAction() {
+  if (!pendingAction.value || !auth.user) return
+  const { kind, budget: b } = pendingAction.value
+  actionBusy.value = true
   formError.value = null
-  if (!auth.user) return
   try {
-    const signedFields = signingKey.signRequest(
-      auth.user.sub,
-      'POST',
-      `/api/v1/budgets/${budgetId}/approve`,
-    )
-    await budget.approveBudget(budgetId, signedFields)
+    if (kind === 'approve') {
+      const signedFields = signingKey.signRequest(auth.user.sub, 'POST', `/api/v1/budgets/${b.id}/approve`)
+      await budget.approveBudget(b.id, signedFields)
+      notify(`“${b.name}” approved.`)
+    } else {
+      await budget.rejectBudget(b.id, rejectReason.value.trim() || undefined)
+      notify(`“${b.name}” rejected.`)
+    }
+    pendingAction.value = null
   } catch (err) {
     formError.value =
       err instanceof Error && err.message.includes('No signing key')
         ? 'Approving a budget requires a signing key — set one up under your account menu → Signing key.'
-        : 'Unable to approve budget'
+        : err instanceof ApiError
+          ? err.message
+          : `Unable to ${kind} the budget. Nothing was changed.`
+  } finally {
+    actionBusy.value = false
   }
 }
 
@@ -103,6 +134,7 @@ async function handleCommit(allocationId: string) {
   const form = commitFormFor(allocationId)
   try {
     await budget.createCommitment(allocationId, form.amount, form.description)
+    notify('Commitment recorded.')
     form.amount = 0
     form.description = ''
   } catch {
@@ -113,16 +145,9 @@ async function handleCommit(allocationId: string) {
 
 <template>
   <section class="mx-auto max-w-5xl px-4 py-10">
-    <div class="page-header">
-      <h1 class="page-title">Budget Management</h1>
-      <p class="page-subtitle">
-        Fiscal years, budgets, allocations, and commitment-control spending.
-      </p>
-    </div>
+    <PageHeader title="Budget management" subtitle="Fiscal years, budgets, allocations, and commitment-control spending." />
 
-    <p v-if="formError" class="mt-4 alert-error">
-      {{ formError }}
-    </p>
+    <AlertBanner v-if="formError" class="mt-4">{{ formError }}</AlertBanner>
 
     <!-- Fiscal Years -->
     <div class="mt-6 card p-6">
@@ -228,24 +253,12 @@ async function handleCommit(allocationId: string) {
         </thead>
         <tbody>
           <tr v-if="budget.budgets.length === 0">
-            <td colspan="5" class="text-center text-slate-500">No budgets yet.</td>
+            <td colspan="5" class="p-0"><EmptyState title="No budgets yet" description="Budgets created here will appear in this list." /></td>
           </tr>
           <tr v-for="b in budget.budgets" :key="b.id">
             <td class="font-medium text-slate-900">{{ b.name }}</td>
-            <td>
-              <span
-                class="badge"
-                :class="{
-                  'badge-neutral': b.status === 'DRAFT',
-                  'badge-warning': b.status === 'PENDING_APPROVAL',
-                  'badge-success': b.status === 'APPROVED' || b.status === 'ACTIVE',
-                  'badge-danger': b.status === 'REJECTED',
-                }"
-              >
-                {{ b.status }}
-              </span>
-            </td>
-            <td>{{ b.totalAuthorizedAmount }}</td>
+            <td><StatusBadge :status="b.status" /></td>
+            <td class="num">{{ money(b.totalAuthorizedAmount) }}</td>
             <td>{{ b.lines.length }}</td>
             <td>
               <button
@@ -256,10 +269,10 @@ async function handleCommit(allocationId: string) {
                 Submit
               </button>
               <template v-if="b.status === 'PENDING_APPROVAL' && auth.hasPermission('budget:approve')">
-                <button class="btn btn-ghost btn-sm text-emerald-700" @click="handleApprove(b.id)">
+                <button class="btn btn-ghost btn-sm text-emerald-700" @click="askApprove(b)">
                   Approve
                 </button>
-                <button class="btn btn-ghost btn-sm text-red-700" @click="budget.rejectBudget(b.id)">Reject</button>
+                <button class="btn btn-ghost btn-sm text-red-700" @click="askReject(b)">Reject</button>
               </template>
             </td>
           </tr>
@@ -282,14 +295,14 @@ async function handleCommit(allocationId: string) {
         </thead>
         <tbody>
           <tr v-if="budget.allocations.length === 0">
-            <td colspan="6" class="text-center text-slate-500">No allocations yet.</td>
+            <td colspan="6" class="p-0"><EmptyState title="No allocations yet" description="Allocations appear once a budget is approved." /></td>
           </tr>
           <tr v-for="a in budget.allocations" :key="a.id">
             <td>{{ a.authorizationReference }}</td>
-            <td>{{ a.authorizedAmount }}</td>
-            <td>{{ a.committedAmount }}</td>
-            <td>{{ a.spentAmount }}</td>
-            <td class="font-medium text-slate-900">{{ a.availableAmount }}</td>
+            <td class="num">{{ money(a.authorizedAmount) }}</td>
+            <td class="num">{{ money(a.committedAmount) }}</td>
+            <td class="num">{{ money(a.spentAmount) }}</td>
+            <td class="num font-medium text-slate-900">{{ money(a.availableAmount) }}</td>
             <td v-if="auth.hasPermission('budget:commit')">
               <div class="flex items-center gap-1">
                 <input
@@ -311,5 +324,25 @@ async function handleCommit(allocationId: string) {
         </tbody>
       </table>
     </div>
+
+    <ConfirmDialog
+      :open="pendingAction !== null"
+      :title="pendingAction?.kind === 'approve' ? 'Approve this budget?' : 'Reject this budget?'"
+      :message="
+        pendingAction
+          ? `${pendingAction.budget.name} — ${money(pendingAction.budget.totalAuthorizedAmount)} across ${pendingAction.budget.lines.length} line${pendingAction.budget.lines.length === 1 ? '' : 's'}. This will be recorded on the audit trail${pendingAction.kind === 'approve' ? ' and signed with your signing key.' : '.'}`
+          : ''
+      "
+      :confirm-label="pendingAction?.kind === 'approve' ? 'Approve' : 'Reject'"
+      :tone="pendingAction?.kind === 'reject' ? 'danger' : 'default'"
+      :busy="actionBusy"
+      @confirm="confirmAction"
+      @cancel="pendingAction = null"
+    >
+      <label v-if="pendingAction?.kind === 'reject'" class="block">
+        <span class="field-label">Reason (optional)</span>
+        <textarea v-model="rejectReason" rows="2" class="input mt-1" placeholder="Why is this budget being rejected?" />
+      </label>
+    </ConfirmDialog>
   </section>
 </template>

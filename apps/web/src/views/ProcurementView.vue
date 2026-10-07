@@ -1,9 +1,16 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
-import { useProcurementStore } from '../stores/procurement'
+import { useProcurementStore, type ProcurementPlan, type ProcurementRequest, type Bid } from '../stores/procurement'
 import { useBudgetStore } from '../stores/budget'
-import { apiGet } from '../api/client'
+import { apiGet, ApiError } from '../api/client'
+import { money } from '../lib/money'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import AlertBanner from '../components/ui/AlertBanner.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
+import { notify } from '../components/ui/toast'
 
 interface Organization {
   id: string
@@ -49,29 +56,48 @@ onMounted(async () => {
   organizations.value = await apiGet<Organization[]>('/organizations')
 })
 
+function describeError(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback
+}
+
 async function handleCreateSupplier() {
-  await procurement.createSupplier(newSupplier.name, newSupplier.registrationNumber)
-  newSupplier.name = ''
-  newSupplier.registrationNumber = ''
+  try {
+    await procurement.createSupplier(newSupplier.name, newSupplier.registrationNumber)
+    notify(`Supplier “${newSupplier.name}” added.`)
+    newSupplier.name = ''
+    newSupplier.registrationNumber = ''
+  } catch (err) {
+    procurement.error = describeError(err, 'Unable to add the supplier.')
+  }
 }
 
 async function handleCreatePlan() {
-  await procurement.createPlan(newPlan.organizationId, newPlan.fiscalYearId, newPlan.name)
-  newPlan.name = ''
+  try {
+    await procurement.createPlan(newPlan.organizationId, newPlan.fiscalYearId, newPlan.name)
+    notify(`Plan “${newPlan.name}” created.`)
+    newPlan.name = ''
+  } catch (err) {
+    procurement.error = describeError(err, 'Unable to create the plan.')
+  }
 }
 
 async function handleCreateRequest() {
-  await procurement.createRequest(
-    newRequest.procurementPlanId,
-    newRequest.organizationId,
-    newRequest.allocationId,
-    newRequest.title,
-    newRequest.description,
-    newRequest.estimatedAmount,
-  )
-  newRequest.title = ''
-  newRequest.description = ''
-  newRequest.estimatedAmount = 0
+  try {
+    await procurement.createRequest(
+      newRequest.procurementPlanId,
+      newRequest.organizationId,
+      newRequest.allocationId,
+      newRequest.title,
+      newRequest.description,
+      newRequest.estimatedAmount,
+    )
+    notify(`Request “${newRequest.title}” created.`)
+    newRequest.title = ''
+    newRequest.description = ''
+    newRequest.estimatedAmount = 0
+  } catch (err) {
+    procurement.error = describeError(err, 'Unable to create the request.')
+  }
 }
 
 function addLot() {
@@ -79,16 +105,21 @@ function addLot() {
 }
 
 async function handleCreateTender() {
-  await procurement.createTender(
-    newTender.procurementRequestId,
-    newTender.title,
-    newTender.description,
-    newTender.closingDate,
-    newTender.lots,
-  )
-  newTender.title = ''
-  newTender.description = ''
-  newTender.lots = [{ lotNumber: '', description: '', estimatedAmount: 0 }]
+  try {
+    await procurement.createTender(
+      newTender.procurementRequestId,
+      newTender.title,
+      newTender.description,
+      newTender.closingDate,
+      newTender.lots,
+    )
+    notify(`Tender “${newTender.title}” created.`)
+    newTender.title = ''
+    newTender.description = ''
+    newTender.lots = [{ lotNumber: '', description: '', estimatedAmount: 0 }]
+  } catch (err) {
+    procurement.error = describeError(err, 'Unable to create the tender.')
+  }
 }
 
 async function toggleLot(lotId: string) {
@@ -101,29 +132,102 @@ async function toggleLot(lotId: string) {
 }
 
 async function handleSubmitBid(lotId: string) {
-  await procurement.submitBid(lotId, bidForm.supplierId, bidForm.amount)
-  bidForm.supplierId = ''
-  bidForm.amount = 0
+  try {
+    await procurement.submitBid(lotId, bidForm.supplierId, bidForm.amount)
+    notify('Bid submitted.')
+    bidForm.supplierId = ''
+    bidForm.amount = 0
+  } catch (err) {
+    procurement.error = describeError(err, 'Unable to submit the bid.')
+  }
 }
 
 function evalFormFor(bidId: string) {
   evalForm[bidId] ??= { technicalScore: 0, financialScore: 0 }
   return evalForm[bidId]
 }
+
+type PendingProcurementAction =
+  | { kind: 'approvePlan'; plan: ProcurementPlan }
+  | { kind: 'approveRequest' | 'rejectRequest'; request: ProcurementRequest }
+  | { kind: 'awardBid'; bid: Bid; lotId: string }
+  | null
+const pendingAction = ref<PendingProcurementAction>(null)
+const actionBusy = ref(false)
+
+function askApprovePlan(plan: ProcurementPlan) {
+  pendingAction.value = { kind: 'approvePlan', plan }
+}
+function askApproveRequest(request: ProcurementRequest) {
+  pendingAction.value = { kind: 'approveRequest', request }
+}
+function askRejectRequest(request: ProcurementRequest) {
+  pendingAction.value = { kind: 'rejectRequest', request }
+}
+function askAwardBid(bid: Bid, lotId: string) {
+  pendingAction.value = { kind: 'awardBid', bid, lotId }
+}
+
+const confirmTitle = computed(() => {
+  switch (pendingAction.value?.kind) {
+    case 'approvePlan':
+      return 'Approve this procurement plan?'
+    case 'approveRequest':
+      return 'Approve this request?'
+    case 'rejectRequest':
+      return 'Reject this request?'
+    case 'awardBid':
+      return 'Award this bid?'
+    default:
+      return ''
+  }
+})
+const confirmMessage = computed(() => {
+  const a = pendingAction.value
+  if (!a) return ''
+  if (a.kind === 'approvePlan') {
+    return `“${a.plan.name}” will be approved. Requests can then be raised against it.`
+  }
+  if (a.kind === 'approveRequest' || a.kind === 'rejectRequest') {
+    return `${a.request.title} — ${money(a.request.estimatedAmount)}. This will be recorded on the audit trail.`
+  }
+  if (a.kind === 'awardBid') {
+    return `Supplier bid of ${money(a.bid.amount)} will be awarded the contract. This cannot be undone.`
+  }
+  return ''
+})
+
+async function confirmAction() {
+  const a = pendingAction.value
+  if (!a) return
+  actionBusy.value = true
+  procurement.error = null
+  try {
+    if (a.kind === 'approvePlan') {
+      await procurement.approvePlan(a.plan.id)
+      notify(`“${a.plan.name}” approved.`)
+    } else if (a.kind === 'approveRequest') {
+      await procurement.approveRequest(a.request.id)
+      if (!procurement.error) notify(`“${a.request.title}” approved.`)
+    } else if (a.kind === 'rejectRequest') {
+      await procurement.rejectRequest(a.request.id)
+      notify(`“${a.request.title}” rejected.`)
+    } else if (a.kind === 'awardBid') {
+      await procurement.awardBid(a.bid.id, a.lotId)
+      if (!procurement.error) notify('Bid awarded.')
+    }
+    pendingAction.value = null
+  } finally {
+    actionBusy.value = false
+  }
+}
 </script>
 
 <template>
   <section class="mx-auto max-w-5xl px-4 py-10">
-    <div class="page-header">
-      <h1 class="page-title">Procurement</h1>
-      <p class="page-subtitle">
-        Plans, requests, tenders, bids, and awards — draws directly against budget allocations.
-      </p>
-    </div>
+    <PageHeader title="Procurement" subtitle="Plans, requests, tenders, bids, and awards — draws directly against budget allocations." />
 
-    <p v-if="procurement.error" class="mt-4 alert-error">
-      {{ procurement.error }}
-    </p>
+    <AlertBanner v-if="procurement.error" class="mt-4">{{ procurement.error }}</AlertBanner>
 
     <!-- Suppliers -->
     <div v-if="auth.hasPermission('procurement:manage')" class="mt-6 card p-6">
@@ -154,18 +258,13 @@ function evalFormFor(bidId: string) {
           <tr v-for="p in procurement.plans" :key="p.id" class="border-t border-slate-100">
             <td class="py-1 pr-2">{{ p.name }}</td>
             <td class="py-1 pr-2">
-              <span
-                class="badge"
-                :class="{ 'badge-neutral': p.status === 'DRAFT', 'badge-success': p.status === 'APPROVED' }"
-              >
-                {{ p.status }}
-              </span>
+              <StatusBadge :status="p.status" />
             </td>
             <td class="py-1">
               <button
                 v-if="p.status === 'DRAFT' && auth.hasPermission('procurement:approve')"
                 class="btn btn-ghost btn-sm text-emerald-700"
-                @click="procurement.approvePlan(p.id)"
+                @click="askApprovePlan(p)"
               >
                 Approve
               </button>
@@ -200,21 +299,14 @@ function evalFormFor(bidId: string) {
           </tr>
         </thead>
         <tbody>
+          <tr v-if="procurement.requests.length === 0">
+            <td colspan="4" class="p-0"><EmptyState title="No procurement requests yet" /></td>
+          </tr>
           <tr v-for="r in procurement.requests" :key="r.id" class="border-t border-slate-100">
             <td class="py-1 pr-2">{{ r.title }}</td>
-            <td class="py-1 pr-2">{{ r.estimatedAmount }}</td>
+            <td class="num py-1 pr-2">{{ money(r.estimatedAmount) }}</td>
             <td class="py-1 pr-2">
-              <span
-                class="badge"
-                :class="{
-                  'badge-neutral': r.status === 'DRAFT',
-                  'badge-warning': r.status === 'SUBMITTED',
-                  'badge-success': r.status === 'APPROVED',
-                  'badge-danger': r.status === 'REJECTED',
-                }"
-              >
-                {{ r.status }}
-              </span>
+              <StatusBadge :status="r.status" />
             </td>
             <td class="py-1">
               <button
@@ -225,10 +317,10 @@ function evalFormFor(bidId: string) {
                 Submit
               </button>
               <template v-if="r.status === 'SUBMITTED' && auth.hasPermission('procurement:approve')">
-                <button class="btn btn-ghost btn-sm text-emerald-700" @click="procurement.approveRequest(r.id)">
+                <button class="btn btn-ghost btn-sm text-emerald-700" @click="askApproveRequest(r)">
                   Approve
                 </button>
-                <button class="btn btn-ghost btn-sm text-red-700" @click="procurement.rejectRequest(r.id)">Reject</button>
+                <button class="btn btn-ghost btn-sm text-red-700" @click="askRejectRequest(r)">Reject</button>
               </template>
             </td>
           </tr>
@@ -249,7 +341,7 @@ function evalFormFor(bidId: string) {
           <select v-model="newRequest.allocationId" required class="select w-auto">
             <option value="" disabled>Allocation</option>
             <option v-for="a in budget.allocations" :key="a.id" :value="a.id">
-              {{ a.authorizationReference }} (avail: {{ a.availableAmount }})
+              {{ a.authorizationReference }} (avail: {{ money(a.availableAmount) }})
             </option>
           </select>
         </div>
@@ -270,16 +362,7 @@ function evalFormFor(bidId: string) {
           <div>
             <span class="text-sm font-medium text-slate-900">{{ t.title }}</span>
             <span class="ml-2 text-xs text-slate-500">{{ t.tenderNumber }}</span>
-            <span
-              class="badge ml-2"
-              :class="{
-                'badge-neutral': t.status === 'DRAFT',
-                'badge-info': t.status === 'PUBLISHED',
-                'badge-warning': t.status === 'CLOSED',
-              }"
-            >
-              {{ t.status }}
-            </span>
+            <StatusBadge class="ml-2" :status="t.status" />
           </div>
           <div v-if="auth.hasPermission('procurement:publish')">
             <button v-if="t.status === 'DRAFT'" class="btn btn-ghost btn-sm" @click="procurement.publishTender(t.id)">
@@ -295,7 +378,7 @@ function evalFormFor(bidId: string) {
           <tbody>
             <tr v-for="lot in t.lots" :key="lot.id" class="border-t border-slate-100">
               <td class="py-1 pr-2">{{ lot.lotNumber }} — {{ lot.description }}</td>
-              <td class="py-1 pr-2">{{ lot.estimatedAmount }}</td>
+              <td class="num py-1 pr-2">{{ money(lot.estimatedAmount) }}</td>
               <td class="py-1">
                 <button class="btn btn-ghost btn-sm" @click="toggleLot(lot.id)">
                   {{ expandedLotId === lot.id ? 'Hide bids' : 'View bids' }}
@@ -319,18 +402,9 @@ function evalFormFor(bidId: string) {
             <tbody>
               <tr v-for="bid in procurement.bidsByLot[expandedLotId] ?? []" :key="bid.id" class="border-t border-slate-100">
                 <td class="py-1 pr-2">{{ bid.supplierId.slice(0, 8) }}…</td>
-                <td class="py-1 pr-2">{{ bid.amount }}</td>
+                <td class="num py-1 pr-2">{{ money(bid.amount) }}</td>
                 <td class="py-1 pr-2">
-                  <span
-                    class="badge"
-                    :class="{
-                      'badge-neutral': bid.status === 'SUBMITTED',
-                      'badge-info': bid.status === 'EVALUATED',
-                      'badge-success': bid.status === 'AWARDED',
-                    }"
-                  >
-                    {{ bid.status }}
-                  </span>
+                  <StatusBadge :status="bid.status" />
                 </td>
                 <td class="py-1 pr-2">
                   <span v-if="bid.technicalScore">T:{{ bid.technicalScore }} F:{{ bid.financialScore }}</span>
@@ -350,7 +424,7 @@ function evalFormFor(bidId: string) {
                   <button
                     v-if="bid.status === 'EVALUATED' && auth.hasPermission('procurement:award')"
                     class="btn btn-ghost btn-sm text-emerald-700"
-                    @click="procurement.awardBid(bid.id, expandedLotId!)"
+                    @click="askAwardBid(bid, expandedLotId!)"
                   >
                     Award
                   </button>
@@ -396,5 +470,16 @@ function evalFormFor(bidId: string) {
         </div>
       </form>
     </div>
+
+    <ConfirmDialog
+      :open="pendingAction !== null"
+      :title="confirmTitle"
+      :message="confirmMessage"
+      :confirm-label="pendingAction?.kind === 'rejectRequest' ? 'Reject' : pendingAction?.kind === 'awardBid' ? 'Award' : 'Approve'"
+      :tone="pendingAction?.kind === 'rejectRequest' ? 'danger' : 'default'"
+      :busy="actionBusy"
+      @confirm="confirmAction"
+      @cancel="pendingAction = null"
+    />
   </section>
 </template>

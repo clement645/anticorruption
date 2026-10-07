@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { apiGet, apiPost } from '../api/client'
+import { requestStepUpToken } from '../lib/stepUp'
 
 export interface Contract {
   id: string
@@ -172,16 +173,26 @@ export const useContractsStore = defineStore('contracts', {
         this.error = 'Unable to record approval — you may have already decided on this request, or verified its invoice yourself'
       }
     },
+    // Payment execution is @RequireStepUp() on the backend — disbursing real money
+    // needs a fresh MFA code, not just a valid session. The shared step-up challenge
+    // (built in the security hardening phase) was never wired in here until now.
     async executePayment(id: string) {
+      // A cancelled step-up challenge is not an execution failure — let it
+      // propagate so the caller can tell "user backed out" apart from "the
+      // API rejected this" rather than reporting both as the same error.
+      const stepUpToken = await requestStepUpToken()
       try {
         const idempotencyKey =
           typeof crypto !== 'undefined' && 'randomUUID' in crypto
             ? crypto.randomUUID()
             : `${Date.now()}-${Math.random().toString(36).slice(2)}`
-        await apiPost(`/payment-requests/${id}/execute`, undefined, { 'Idempotency-Key': idempotencyKey })
+        await apiPost(`/payment-requests/${id}/execute`, undefined, {
+          'Idempotency-Key': idempotencyKey,
+          'X-Step-Up-Token': stepUpToken,
+        })
         await Promise.all([this.fetchPaymentRequests(), this.fetchPayments(), this.fetchInvoices()])
       } catch {
-        this.error = 'Unable to execute payment — it may not be fully approved yet'
+        this.error = 'Unable to execute payment — it may not be fully approved yet, or the step-up code was not accepted'
       }
     },
 

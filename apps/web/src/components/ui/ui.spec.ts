@@ -16,6 +16,13 @@ describe('status registry', () => {
   it('still labels an unknown status readably rather than hiding it', () => {
     expect(statusFor('SOME_NEW_STATE')).toEqual({ label: 'Some new state', tone: 'neutral' })
   })
+
+  it('maps the financial-lifecycle statuses introduced by the budget, procurement, and contracts screens', () => {
+    expect(statusFor('EXECUTED').tone).toBe('success')
+    expect(statusFor('TERMINATED').tone).toBe('danger')
+    expect(statusFor('ISSUED').tone).toBe('success')
+    expect(statusFor('CANCELLED').tone).toBe('danger')
+  })
 })
 
 describe('StatusBadge', () => {

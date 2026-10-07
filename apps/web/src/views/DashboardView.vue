@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { apiGet } from '../api/client'
+import { money } from '../lib/money'
 import PageHeader from '../components/ui/PageHeader.vue'
 import AlertBanner from '../components/ui/AlertBanner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -17,10 +18,7 @@ import StatusBadge from '../components/ui/StatusBadge.vue'
  */
 
 const auth = useAuthStore()
-const amountFormat = new Intl.NumberFormat('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-function money(value: number) {
-  return `KES ${amountFormat.format(value)}`
-}
+
 
 interface Allocation {
   authorizedAmount: string

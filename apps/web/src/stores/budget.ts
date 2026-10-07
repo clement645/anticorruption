@@ -24,6 +24,7 @@ export interface Budget {
   status: string
   totalAuthorizedAmount: string
   lines: BudgetLine[]
+  createdById: string | null
 }
 
 export interface Allocation {
@@ -109,8 +110,8 @@ export const useBudgetStore = defineStore('budget', {
       await this.fetchBudgets()
     },
 
-    async rejectBudget(id: string) {
-      await apiPost(`/budgets/${id}/reject`)
+    async rejectBudget(id: string, reason?: string) {
+      await apiPost(`/budgets/${id}/reject`, reason ? { reason } : undefined)
       await this.fetchBudgets()
     },
 

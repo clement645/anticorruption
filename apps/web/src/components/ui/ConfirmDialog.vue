@@ -80,6 +80,9 @@ function onKeydown(event: KeyboardEvent) {
     >
       <h2 id="confirm-title" class="text-base font-semibold text-slate-900">{{ title }}</h2>
       <p id="confirm-message" class="mt-2 text-sm text-slate-600">{{ message }}</p>
+      <div v-if="$slots.default" class="mt-4">
+        <slot />
+      </div>
       <div class="mt-6 flex justify-end gap-2">
         <button ref="cancelButton" type="button" class="btn btn-secondary" :disabled="busy" @click="emit('cancel')">
           {{ cancelLabel }}

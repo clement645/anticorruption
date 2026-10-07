@@ -1,7 +1,20 @@
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
-import { useContractsStore } from '../stores/contracts'
+import {
+  useContractsStore,
+  type Contract,
+  type PurchaseOrder,
+  type Invoice,
+  type PaymentRequest,
+} from '../stores/contracts'
+import { ApiError } from '../api/client'
+import { money } from '../lib/money'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import AlertBanner from '../components/ui/AlertBanner.vue'
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
+import { notify } from '../components/ui/toast'
 
 const auth = useAuthStore()
 const store = useContractsStore()
@@ -84,9 +97,152 @@ async function handleCreateInvoice() {
   invoiceForm.unitPrice = 0
 }
 
-async function handleRejectInvoice(id: string) {
-  await store.rejectInvoice(id, rejectReasonByInvoice[id] || 'Rejected')
-  delete rejectReasonByInvoice[id]
+type PendingContractAction =
+  | { kind: 'terminateContract'; contract: Contract }
+  | { kind: 'cancelPO'; po: PurchaseOrder }
+  | { kind: 'verifyInvoice' | 'rejectInvoice'; invoice: Invoice }
+  | { kind: 'approvePayment' | 'rejectPayment'; request: PaymentRequest }
+  | { kind: 'executePayment'; request: PaymentRequest }
+  | null
+const pendingAction = ref<PendingContractAction>(null)
+const actionBusy = ref(false)
+
+function askTerminateContract(contract: Contract) {
+  pendingAction.value = { kind: 'terminateContract', contract }
+}
+function askCancelPO(po: PurchaseOrder) {
+  pendingAction.value = { kind: 'cancelPO', po }
+}
+function askVerifyInvoice(invoice: Invoice) {
+  pendingAction.value = { kind: 'verifyInvoice', invoice }
+}
+function askRejectInvoice(invoice: Invoice) {
+  pendingAction.value = { kind: 'rejectInvoice', invoice }
+}
+function askApprovePayment(request: PaymentRequest) {
+  pendingAction.value = { kind: 'approvePayment', request }
+}
+function askRejectPayment(request: PaymentRequest) {
+  pendingAction.value = { kind: 'rejectPayment', request }
+}
+function askExecutePayment(request: PaymentRequest) {
+  pendingAction.value = { kind: 'executePayment', request }
+}
+
+const confirmTitle = computed(() => {
+  switch (pendingAction.value?.kind) {
+    case 'terminateContract':
+      return 'Terminate this contract?'
+    case 'cancelPO':
+      return 'Cancel this purchase order?'
+    case 'verifyInvoice':
+      return 'Verify this invoice?'
+    case 'rejectInvoice':
+      return 'Reject this invoice?'
+    case 'approvePayment':
+      return 'Approve this payment?'
+    case 'rejectPayment':
+      return 'Reject this payment?'
+    case 'executePayment':
+      return 'Execute this payment?'
+    default:
+      return ''
+  }
+})
+const confirmMessage = computed(() => {
+  const a = pendingAction.value
+  if (!a) return ''
+  if (a.kind === 'terminateContract') return `${a.contract.contractNumber} — ${a.contract.title}. This cannot be undone.`
+  if (a.kind === 'cancelPO') return `${a.po.poNumber} — ${money(a.po.amount)}. This cannot be undone.`
+  if (a.kind === 'verifyInvoice') return `${a.invoice.invoiceNumber} — ${money(a.invoice.amount)}.`
+  if (a.kind === 'rejectInvoice') return `${a.invoice.invoiceNumber} — ${money(a.invoice.amount)}.`
+  if (a.kind === 'approvePayment') {
+    return `${money(a.request.amount)}. Your decision is recorded against your identity and cannot be changed afterwards.`
+  }
+  if (a.kind === 'rejectPayment') {
+    return `${money(a.request.amount)}. Your decision is recorded against your identity and cannot be changed afterwards.`
+  }
+  if (a.kind === 'executePayment') {
+    return `${money(a.request.amount)} will be disbursed. This cannot be reversed from this screen. You will be asked for a fresh authenticator code.`
+  }
+  return ''
+})
+const confirmTone = computed(() =>
+  pendingAction.value &&
+  ['terminateContract', 'cancelPO', 'rejectInvoice', 'rejectPayment', 'executePayment'].includes(pendingAction.value.kind)
+    ? 'danger'
+    : 'default',
+)
+const confirmLabel = computed(() => {
+  switch (pendingAction.value?.kind) {
+    case 'terminateContract':
+      return 'Terminate'
+    case 'cancelPO':
+      return 'Cancel PO'
+    case 'verifyInvoice':
+      return 'Verify'
+    case 'rejectInvoice':
+    case 'rejectPayment':
+      return 'Reject'
+    case 'approvePayment':
+      return 'Approve'
+    case 'executePayment':
+      return 'Execute payment'
+    default:
+      return 'Confirm'
+  }
+})
+
+const pendingPaymentNotesFor = computed<PaymentRequest | null>(() => {
+  const a = pendingAction.value
+  return a && (a.kind === 'approvePayment' || a.kind === 'rejectPayment') ? a.request : null
+})
+
+function describeError(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback
+}
+
+async function confirmAction() {
+  const a = pendingAction.value
+  if (!a) return
+  actionBusy.value = true
+  store.error = null
+  try {
+    if (a.kind === 'terminateContract') {
+      await store.terminateContract(a.contract.id)
+      notify(`${a.contract.contractNumber} terminated.`)
+    } else if (a.kind === 'cancelPO') {
+      await store.cancelPurchaseOrder(a.po.id)
+      notify(`${a.po.poNumber} cancelled.`)
+    } else if (a.kind === 'verifyInvoice') {
+      await store.verifyInvoice(a.invoice.id)
+      notify(`${a.invoice.invoiceNumber} verified.`)
+    } else if (a.kind === 'rejectInvoice') {
+      await store.rejectInvoice(a.invoice.id, rejectReasonByInvoice[a.invoice.id] || 'Rejected')
+      delete rejectReasonByInvoice[a.invoice.id]
+      notify(`${a.invoice.invoiceNumber} rejected.`)
+    } else if (a.kind === 'approvePayment') {
+      await store.castApproval(a.request.id, 'APPROVE', notesByRequest[a.request.id])
+      if (!store.error) notify('Approval recorded.')
+    } else if (a.kind === 'rejectPayment') {
+      await store.castApproval(a.request.id, 'REJECT', notesByRequest[a.request.id])
+      if (!store.error) notify('Rejection recorded.')
+    } else if (a.kind === 'executePayment') {
+      await store.executePayment(a.request.id)
+      if (!store.error) notify('Payment executed.')
+    }
+    if (!store.error) pendingAction.value = null
+  } catch (err) {
+    // Backing out of the step-up challenge closes the dialog quietly — it is
+    // not a failure, just a change of mind.
+    if (err instanceof Error && err.message.includes('cancelled')) {
+      pendingAction.value = null
+    } else {
+      store.error = describeError(err, 'That action did not complete. Nothing was changed.')
+    }
+  } finally {
+    actionBusy.value = false
+  }
 }
 
 function reconcileFormFor(paymentId: string) {
@@ -110,16 +266,9 @@ function activeContracts() {
 
 <template>
   <section class="mx-auto max-w-5xl px-4 py-10">
-    <div class="page-header">
-      <h1 class="page-title">Contracts, Invoices &amp; Payments</h1>
-      <p class="page-subtitle">
-        Award → Contract → Purchase Order → Invoice → multi-signature Payment approval → execution.
-      </p>
-    </div>
+    <PageHeader title="Contracts, invoices &amp; payments" subtitle="Award → Contract → Purchase Order → Invoice → multi-signature Payment approval → execution." />
 
-    <p v-if="store.error" class="mt-4 alert-error">
-      {{ store.error }}
-    </p>
+    <AlertBanner v-if="store.error" class="mt-4">{{ store.error }}</AlertBanner>
 
     <!-- Contracts -->
     <div class="mt-6 card p-6">
@@ -138,19 +287,9 @@ function activeContracts() {
           <tr v-for="c in store.contracts" :key="c.id" class="border-t border-slate-100">
             <td class="py-1 pr-2">{{ c.contractNumber }}</td>
             <td class="py-1 pr-2">{{ c.title }}</td>
-            <td class="py-1 pr-2">{{ c.value }}</td>
+            <td class="num py-1 pr-2">{{ money(c.value) }}</td>
             <td class="py-1 pr-2">
-              <span
-                class="badge"
-                :class="{
-                  'badge-neutral': c.status === 'DRAFT',
-                  'badge-success': c.status === 'ACTIVE',
-                  'badge-info': c.status === 'COMPLETED',
-                  'badge-danger': c.status === 'TERMINATED',
-                }"
-              >
-                {{ c.status }}
-              </span>
+              <StatusBadge :status="c.status" />
             </td>
             <td class="py-1">
               <template v-if="canManageContracts">
@@ -163,7 +302,7 @@ function activeContracts() {
                 <button
                   v-if="c.status === 'DRAFT' || c.status === 'ACTIVE'"
                   class="btn btn-ghost btn-sm text-red-700"
-                  @click="store.terminateContract(c.id)"
+                  @click="askTerminateContract(c)"
                 >
                   Terminate
                 </button>
@@ -203,25 +342,16 @@ function activeContracts() {
           <tr v-for="po in store.purchaseOrders" :key="po.id" class="border-t border-slate-100">
             <td class="py-1 pr-2">{{ po.poNumber }}</td>
             <td class="py-1 pr-2">{{ po.description }}</td>
-            <td class="py-1 pr-2">{{ po.amount }}</td>
+            <td class="num py-1 pr-2">{{ money(po.amount) }}</td>
             <td class="py-1 pr-2">
-              <span
-                class="badge"
-                :class="{
-                  'badge-neutral': po.status === 'DRAFT',
-                  'badge-success': po.status === 'ISSUED',
-                  'badge-danger': po.status === 'CANCELLED',
-                }"
-              >
-                {{ po.status }}
-              </span>
+              <StatusBadge :status="po.status" />
             </td>
             <td class="py-1">
               <template v-if="canManageContracts">
                 <button v-if="po.status === 'DRAFT'" class="btn btn-ghost btn-sm text-emerald-700" @click="store.issuePurchaseOrder(po.id)">
                   Issue
                 </button>
-                <button v-if="po.status === 'DRAFT' || po.status === 'ISSUED'" class="btn btn-ghost btn-sm text-red-700" @click="store.cancelPurchaseOrder(po.id)">
+                <button v-if="po.status === 'DRAFT' || po.status === 'ISSUED'" class="btn btn-ghost btn-sm text-red-700" @click="askCancelPO(po)">
                   Cancel
                 </button>
               </template>
@@ -254,26 +384,20 @@ function activeContracts() {
           </tr>
         </thead>
         <tbody>
+          <tr v-if="store.invoices.length === 0">
+            <td colspan="4" class="p-0"><EmptyState title="No invoices yet" /></td>
+          </tr>
           <tr v-for="inv in store.invoices" :key="inv.id" class="border-t border-slate-100">
             <td class="py-1 pr-2">{{ inv.invoiceNumber }}</td>
-            <td class="py-1 pr-2">{{ inv.amount }}</td>
+            <td class="num py-1 pr-2">{{ money(inv.amount) }}</td>
             <td class="py-1 pr-2">
-              <span
-                class="badge"
-                :class="{
-                  'badge-warning': inv.status === 'SUBMITTED',
-                  'badge-success': inv.status === 'VERIFIED',
-                  'badge-danger': inv.status === 'REJECTED',
-                }"
-              >
-                {{ inv.status }}
-              </span>
+              <StatusBadge :status="inv.status" />
             </td>
             <td class="py-1">
               <div v-if="inv.status === 'SUBMITTED' && canVerifyInvoice" class="flex items-center gap-1">
-                <button class="btn btn-ghost btn-sm text-emerald-700" @click="store.verifyInvoice(inv.id)">Verify</button>
+                <button class="btn btn-ghost btn-sm text-emerald-700" @click="askVerifyInvoice(inv)">Verify</button>
                 <input v-model="rejectReasonByInvoice[inv.id]" placeholder="Reason" class="input w-28 px-1.5 py-1 text-xs" />
-                <button class="btn btn-ghost btn-sm text-red-700" @click="handleRejectInvoice(inv.id)">Reject</button>
+                <button class="btn btn-ghost btn-sm text-red-700" @click="askRejectInvoice(inv)">Reject</button>
               </div>
             </td>
           </tr>
@@ -298,19 +422,11 @@ function activeContracts() {
       <p class="mt-1 text-[11px] text-slate-400">
         Multi-signature approval — {{ store.paymentRequests[0]?.requiredApprovals ?? 2 }} distinct approvers required before execution.
       </p>
+      <EmptyState v-if="store.paymentRequests.length === 0" title="No payment requests yet" />
       <div v-for="pr in store.paymentRequests" :key="pr.id" class="mt-3 rounded-lg border border-slate-100 p-3 text-xs">
         <div class="flex items-center justify-between">
-          <span class="font-medium">{{ pr.amount }}</span>
-          <span
-            class="badge"
-            :class="{
-              'badge-warning': pr.status === 'PENDING',
-              'badge-success': pr.status === 'APPROVED' || pr.status === 'EXECUTED',
-              'badge-danger': pr.status === 'REJECTED',
-            }"
-          >
-            {{ pr.status }}
-          </span>
+          <span class="num font-medium">{{ money(pr.amount) }}</span>
+          <StatusBadge :status="pr.status" />
           <span class="text-slate-400">{{ pr.approvals.length }}/{{ pr.requiredApprovals }} approvals</span>
         </div>
         <ul class="mt-1 text-slate-500">
@@ -318,17 +434,17 @@ function activeContracts() {
         </ul>
         <div v-if="pr.status === 'PENDING' && canApprovePayment" class="mt-2 flex items-center gap-1">
           <input v-model="notesByRequest[pr.id]" placeholder="Notes" class="input w-40 px-1.5 py-1 text-xs" />
-          <button class="btn btn-secondary btn-sm text-emerald-700" @click="store.castApproval(pr.id, 'APPROVE', notesByRequest[pr.id])">
+          <button class="btn btn-secondary btn-sm text-emerald-700" @click="askApprovePayment(pr)">
             Approve
           </button>
-          <button class="btn btn-secondary btn-sm text-red-700" @click="store.castApproval(pr.id, 'REJECT', notesByRequest[pr.id])">
+          <button class="btn btn-secondary btn-sm text-red-700" @click="askRejectPayment(pr)">
             Reject
           </button>
         </div>
         <button
           v-if="pr.status === 'APPROVED' && canExecutePayment"
           class="btn btn-primary btn-sm mt-2"
-          @click="store.executePayment(pr.id)"
+          @click="askExecutePayment(pr)"
         >
           Execute payment
         </button>
@@ -348,9 +464,12 @@ function activeContracts() {
           </tr>
         </thead>
         <tbody>
+          <tr v-if="store.payments.length === 0">
+            <td colspan="4" class="p-0"><EmptyState title="No payments executed yet" /></td>
+          </tr>
           <tr v-for="p in store.payments" :key="p.id" class="border-t border-slate-100">
             <td class="py-1 pr-2 font-mono">{{ p.reference }}</td>
-            <td class="py-1 pr-2">{{ p.amount }}</td>
+            <td class="num py-1 pr-2">{{ money(p.amount) }}</td>
             <td class="py-1 pr-2 text-slate-500">{{ new Date(p.executedAt).toLocaleString() }}</td>
             <td class="py-1">
               <div v-if="canReconcile" class="flex items-center gap-1">
@@ -366,5 +485,29 @@ function activeContracts() {
         </tbody>
       </table>
     </div>
+
+    <ConfirmDialog
+      :open="pendingAction !== null"
+      :title="confirmTitle"
+      :message="confirmMessage"
+      :confirm-label="confirmLabel"
+      :tone="confirmTone"
+      :busy="actionBusy"
+      @confirm="confirmAction"
+      @cancel="pendingAction = null"
+    >
+      <label v-if="pendingAction?.kind === 'rejectInvoice'" class="block">
+        <span class="field-label">Reason</span>
+        <input
+          v-model="rejectReasonByInvoice[pendingAction.invoice.id]"
+          class="input mt-1"
+          placeholder="Why is this invoice being rejected?"
+        />
+      </label>
+      <label v-else-if="pendingPaymentNotesFor" class="block">
+        <span class="field-label">Notes (optional)</span>
+        <input v-model="notesByRequest[pendingPaymentNotesFor.id]" class="input mt-1" placeholder="Add a note for the audit trail" />
+      </label>
+    </ConfirmDialog>
   </section>
 </template>
