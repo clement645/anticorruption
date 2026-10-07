@@ -35,11 +35,19 @@ export class FiscalYearsService {
     return toView(fy);
   }
 
-  async list(): Promise<FiscalYearView[]> {
-    const fys = await this.prisma.fiscalYear.findMany({
-      orderBy: { startDate: 'desc' },
-    });
-    return fys.map(toView);
+  async list(params: {
+    skip?: number;
+    take?: number;
+  }): Promise<{ items: FiscalYearView[]; total: number }> {
+    const [fys, total] = await this.prisma.$transaction([
+      this.prisma.fiscalYear.findMany({
+        orderBy: { startDate: 'desc' },
+        skip: params.skip ?? 0,
+        take: Math.min(params.take ?? 25, 100),
+      }),
+      this.prisma.fiscalYear.count(),
+    ]);
+    return { items: fys.map(toView), total };
   }
 
   async getByIdOrThrow(id: string): Promise<FiscalYear> {

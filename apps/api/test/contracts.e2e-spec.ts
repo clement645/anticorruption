@@ -558,8 +558,10 @@ describe('Contracts, Invoices & Payments (e2e)', () => {
       .set('Authorization', `Bearer ${fullToken}`)
       .expect(200);
     const pr = (
-      paymentRequests.body as Array<PaymentRequestBody & { invoiceId: string }>
-    ).find((p) => p.invoiceId === invoiceId);
+      paymentRequests.body as {
+        items: Array<PaymentRequestBody & { invoiceId: string }>;
+      }
+    ).items.find((p) => p.invoiceId === invoiceId);
     expect(pr).toBeDefined();
 
     return { paymentRequestId: pr!.id, invoiceId };

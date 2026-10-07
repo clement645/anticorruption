@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, type Ref } from 'vue'
+import { ChevronLeft, ChevronRight } from '@lucide/vue'
 import { useAuthStore } from '../stores/auth'
 import { useBudgetStore, type Budget } from '../stores/budget'
 import { useSigningKeyStore } from '../stores/signingKey'
@@ -9,8 +10,19 @@ import PageHeader from '../components/ui/PageHeader.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import AlertBanner from '../components/ui/AlertBanner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
+import SkeletonRows from '../components/ui/SkeletonRows.vue'
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
 import { notify } from '../components/ui/toast'
+
+const PAGE_SIZE = 25
+/** See the identical helper in ContractsView.vue — each list below paginates independently. */
+function pager(total: () => number, page: Ref<number>) {
+  return reactive({
+    totalPages: computed(() => Math.max(1, Math.ceil(total() / PAGE_SIZE))),
+    rangeStart: computed(() => (total() === 0 ? 0 : page.value * PAGE_SIZE + 1)),
+    rangeEnd: computed(() => Math.min(total(), (page.value + 1) * PAGE_SIZE)),
+  })
+}
 
 interface Organization {
   id: string
@@ -32,6 +44,26 @@ const newBudget = reactive({
 })
 const commitForm = reactive<Record<string, { amount: number; description: string }>>({})
 const formError = ref<string | null>(null)
+
+const fyPage = ref(0)
+const budgetsPage = ref(0)
+const allocationsPage = ref(0)
+const fyPager = pager(() => budget.fiscalYearsTotal, fyPage)
+const budgetsPager = pager(() => budget.budgetsTotal, budgetsPage)
+const allocationsPager = pager(() => budget.allocationsTotal, allocationsPage)
+
+function goToFyPage(p: number) {
+  fyPage.value = p
+  void budget.fetchFiscalYears({ skip: p * PAGE_SIZE, take: PAGE_SIZE })
+}
+function goToBudgetsPage(p: number) {
+  budgetsPage.value = p
+  void budget.fetchBudgets({ ...budget.lastBudgetQuery, skip: p * PAGE_SIZE, take: PAGE_SIZE })
+}
+function goToAllocationsPage(p: number) {
+  allocationsPage.value = p
+  void budget.fetchAllocations({ ...budget.lastAllocationQuery, skip: p * PAGE_SIZE, take: PAGE_SIZE })
+}
 
 onMounted(async () => {
   await Promise.all([budget.fetchFiscalYears(), budget.fetchBudgets(), budget.fetchAllocations()])
@@ -152,11 +184,23 @@ async function handleCommit(allocationId: string) {
     <!-- Fiscal Years -->
     <div class="mt-6 card p-6">
       <h2 class="section-title">Fiscal Years</h2>
-      <div class="mt-3 flex flex-wrap gap-2">
+      <SkeletonRows v-if="budget.fiscalYearsLoading" :rows="1" :columns="4" class="mt-3" />
+      <div v-else class="mt-3 flex flex-wrap gap-2">
         <span v-for="fy in budget.fiscalYears" :key="fy.id" class="badge badge-neutral">
           {{ fy.name }} ({{ fy.status }})
         </span>
         <span v-if="budget.fiscalYears.length === 0" class="text-xs text-slate-500">None yet.</span>
+      </div>
+      <div v-if="budget.fiscalYearsTotal > 0" class="mt-2 flex items-center justify-between text-xs text-slate-500">
+        <span>Showing {{ fyPager.rangeStart }}–{{ fyPager.rangeEnd }} of {{ budget.fiscalYearsTotal }}</span>
+        <div class="flex gap-2">
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="fyPage === 0" @click="goToFyPage(fyPage - 1)">
+            <ChevronLeft class="h-3.5 w-3.5" /> Previous
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="fyPage >= fyPager.totalPages - 1" @click="goToFyPage(fyPage + 1)">
+            Next <ChevronRight class="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       <form
@@ -261,7 +305,10 @@ async function handleCommit(allocationId: string) {
           </tr>
         </thead>
         <tbody>
-          <tr v-if="budget.budgets.length === 0">
+          <tr v-if="budget.loading">
+            <td colspan="5" class="p-0"><SkeletonRows :rows="3" :columns="5" /></td>
+          </tr>
+          <tr v-else-if="budget.budgets.length === 0">
             <td colspan="5" class="p-0"><EmptyState title="No budgets yet" description="Budgets created here will appear in this list." /></td>
           </tr>
           <tr v-for="b in budget.budgets" :key="b.id">
@@ -287,6 +334,22 @@ async function handleCommit(allocationId: string) {
           </tr>
         </tbody>
       </table>
+      <div v-if="budget.budgetsTotal > 0" class="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500">
+        <span>Showing {{ budgetsPager.rangeStart }}–{{ budgetsPager.rangeEnd }} of {{ budget.budgetsTotal }}</span>
+        <div class="flex gap-2">
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="budgetsPage === 0" @click="goToBudgetsPage(budgetsPage - 1)">
+            <ChevronLeft class="h-3.5 w-3.5" /> Previous
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            :disabled="budgetsPage >= budgetsPager.totalPages - 1"
+            @click="goToBudgetsPage(budgetsPage + 1)"
+          >
+            Next <ChevronRight class="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Allocations -->
@@ -303,7 +366,10 @@ async function handleCommit(allocationId: string) {
           </tr>
         </thead>
         <tbody>
-          <tr v-if="budget.allocations.length === 0">
+          <tr v-if="budget.allocationsLoading">
+            <td colspan="6" class="p-0"><SkeletonRows :rows="3" :columns="6" /></td>
+          </tr>
+          <tr v-else-if="budget.allocations.length === 0">
             <td colspan="6" class="p-0"><EmptyState title="No allocations yet" description="Allocations appear once a budget is approved." /></td>
           </tr>
           <tr v-for="a in budget.allocations" :key="a.id">
@@ -332,6 +398,30 @@ async function handleCommit(allocationId: string) {
           </tr>
         </tbody>
       </table>
+      <div
+        v-if="budget.allocationsTotal > 0"
+        class="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500"
+      >
+        <span>Showing {{ allocationsPager.rangeStart }}–{{ allocationsPager.rangeEnd }} of {{ budget.allocationsTotal }}</span>
+        <div class="flex gap-2">
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            :disabled="allocationsPage === 0"
+            @click="goToAllocationsPage(allocationsPage - 1)"
+          >
+            <ChevronLeft class="h-3.5 w-3.5" /> Previous
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            :disabled="allocationsPage >= allocationsPager.totalPages - 1"
+            @click="goToAllocationsPage(allocationsPage + 1)"
+          >
+            Next <ChevronRight class="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
     </div>
 
     <ConfirmDialog

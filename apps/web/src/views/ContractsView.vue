@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, type Ref } from 'vue'
+import { ChevronLeft, ChevronRight } from '@lucide/vue'
 import { useAuthStore } from '../stores/auth'
 import {
   useContractsStore,
@@ -17,6 +18,21 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import SkeletonRows from '../components/ui/SkeletonRows.vue'
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
 import { notify } from '../components/ui/toast'
+
+const PAGE_SIZE = 25
+/**
+ * One page-number ref + its own "Showing X–Y of Z" numbers — each of the
+ * five lists below paginates independently. Wrapped in reactive() so its
+ * computed properties read as plain numbers in both script and template,
+ * rather than needing `.value` on a ref nested inside a plain object.
+ */
+function pager(total: () => number, page: Ref<number>) {
+  return reactive({
+    totalPages: computed(() => Math.max(1, Math.ceil(total() / PAGE_SIZE))),
+    rangeStart: computed(() => (total() === 0 ? 0 : page.value * PAGE_SIZE + 1)),
+    rangeEnd: computed(() => Math.min(total(), (page.value + 1) * PAGE_SIZE)),
+  })
+}
 
 const auth = useAuthStore()
 const store = useContractsStore()
@@ -50,6 +66,38 @@ const invoiceForm = reactive({
 const rejectReasonByInvoice = reactive<Record<string, string>>({})
 const notesByRequest = reactive<Record<string, string>>({})
 const reconcileForm = reactive<Record<string, { externalReference: string; status: 'MATCHED' | 'DISCREPANCY' }>>({})
+
+const contractsPage = ref(0)
+const poPage = ref(0)
+const invoicesPage = ref(0)
+const paymentRequestsPage = ref(0)
+const paymentsPage = ref(0)
+const contractsPager = pager(() => store.contractsTotal, contractsPage)
+const poPager = pager(() => store.purchaseOrdersTotal, poPage)
+const invoicesPager = pager(() => store.invoicesTotal, invoicesPage)
+const paymentRequestsPager = pager(() => store.paymentRequestsTotal, paymentRequestsPage)
+const paymentsPager = pager(() => store.paymentsTotal, paymentsPage)
+
+function goToContractsPage(p: number) {
+  contractsPage.value = p
+  void store.fetchContracts({ skip: p * PAGE_SIZE, take: PAGE_SIZE })
+}
+function goToPoPage(p: number) {
+  poPage.value = p
+  void store.fetchPurchaseOrders({ skip: p * PAGE_SIZE, take: PAGE_SIZE })
+}
+function goToInvoicesPage(p: number) {
+  invoicesPage.value = p
+  void store.fetchInvoices({ skip: p * PAGE_SIZE, take: PAGE_SIZE })
+}
+function goToPaymentRequestsPage(p: number) {
+  paymentRequestsPage.value = p
+  void store.fetchPaymentRequests({ skip: p * PAGE_SIZE, take: PAGE_SIZE })
+}
+function goToPaymentsPage(p: number) {
+  paymentsPage.value = p
+  void store.fetchPayments({ skip: p * PAGE_SIZE, take: PAGE_SIZE })
+}
 
 onMounted(async () => {
   await Promise.all([
@@ -262,13 +310,6 @@ async function handleReconcile(paymentId: string) {
   }
 }
 
-function activePOs() {
-  return store.purchaseOrders.filter((p) => p.status === 'ISSUED')
-}
-function activeContracts() {
-  return store.contracts.filter((c) => c.status === 'ACTIVE')
-}
-
 /** The approver who already voted on this request, if the current user is one. */
 function myApproval(pr: PaymentRequest) {
   return pr.approvals.find((a) => a.approvedById === auth.user?.sub) ?? null
@@ -307,6 +348,12 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
           </tr>
         </thead>
         <tbody>
+          <tr v-if="store.contractsLoading">
+            <td colspan="5" class="p-0"><SkeletonRows :rows="3" :columns="5" /></td>
+          </tr>
+          <tr v-else-if="store.contracts.length === 0">
+            <td colspan="5" class="p-0"><EmptyState title="No contracts yet" /></td>
+          </tr>
           <tr v-for="c in store.contracts" :key="c.id" class="border-t border-slate-100">
             <td class="py-1 pr-2">{{ c.contractNumber }}</td>
             <td class="py-1 pr-2">{{ c.title }}</td>
@@ -334,6 +381,22 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
           </tr>
         </tbody>
       </table>
+      </div>
+      <div v-if="store.contractsTotal > 0" class="mt-2 flex items-center justify-between text-xs text-slate-500">
+        <span>Showing {{ contractsPager.rangeStart }}–{{ contractsPager.rangeEnd }} of {{ store.contractsTotal }}</span>
+        <div class="flex gap-2">
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="contractsPage === 0" @click="goToContractsPage(contractsPage - 1)">
+            <ChevronLeft class="h-3.5 w-3.5" /> Previous
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            :disabled="contractsPage >= contractsPager.totalPages - 1"
+            @click="goToContractsPage(contractsPage + 1)"
+          >
+            Next <ChevronRight class="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
       <form v-if="canManageContracts" class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleCreateContract">
         <input v-model="contractForm.awardId" required placeholder="Award ID" class="input w-64" />
@@ -364,6 +427,12 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
           </tr>
         </thead>
         <tbody>
+          <tr v-if="store.purchaseOrdersLoading">
+            <td colspan="5" class="p-0"><SkeletonRows :rows="3" :columns="5" /></td>
+          </tr>
+          <tr v-else-if="store.purchaseOrders.length === 0">
+            <td colspan="5" class="p-0"><EmptyState title="No purchase orders yet" /></td>
+          </tr>
           <tr v-for="po in store.purchaseOrders" :key="po.id" class="border-t border-slate-100">
             <td class="py-1 pr-2">{{ po.poNumber }}</td>
             <td class="py-1 pr-2">{{ po.description }}</td>
@@ -385,16 +454,28 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
         </tbody>
       </table>
       </div>
+      <div v-if="store.purchaseOrdersTotal > 0" class="mt-2 flex items-center justify-between text-xs text-slate-500">
+        <span>Showing {{ poPager.rangeStart }}–{{ poPager.rangeEnd }} of {{ store.purchaseOrdersTotal }}</span>
+        <div class="flex gap-2">
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="poPage === 0" @click="goToPoPage(poPage - 1)">
+            <ChevronLeft class="h-3.5 w-3.5" /> Previous
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="poPage >= poPager.totalPages - 1" @click="goToPoPage(poPage + 1)">
+            Next <ChevronRight class="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
       <form v-if="canManageContracts" class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleCreatePO">
-        <select v-model="poForm.contractId" required aria-label="Active contract" class="select w-auto max-w-full">
-          <option value="" disabled>Active contract</option>
-          <option v-for="c in activeContracts()" :key="c.id" :value="c.id">{{ c.contractNumber }}</option>
-        </select>
+        <input v-model="poForm.contractId" required placeholder="Active contract ID" class="input w-64" />
         <input v-model="poForm.poNumber" required placeholder="PO number" class="input" />
         <input v-model="poForm.description" required placeholder="Description" class="input" />
         <input v-model.number="poForm.amount" type="number" min="1" required placeholder="Amount" class="input w-28" />
         <button type="submit" class="btn btn-primary btn-sm">Create PO</button>
       </form>
+      <p v-if="canManageContracts" class="mt-1 text-[11px] text-slate-500">
+        Enter the ID of an ACTIVE contract — the list above may not show every active contract once there are more than
+        {{ PAGE_SIZE }}.
+      </p>
     </div>
 
     <!-- Invoices -->
@@ -411,7 +492,10 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
           </tr>
         </thead>
         <tbody>
-          <tr v-if="store.invoices.length === 0">
+          <tr v-if="store.invoicesLoading">
+            <td colspan="4" class="p-0"><SkeletonRows :rows="3" :columns="4" /></td>
+          </tr>
+          <tr v-else-if="store.invoices.length === 0">
             <td colspan="4" class="p-0"><EmptyState title="No invoices yet" /></td>
           </tr>
           <tr v-for="inv in store.invoices" :key="inv.id" class="border-t border-slate-100">
@@ -431,17 +515,34 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
         </tbody>
       </table>
       </div>
+      <div v-if="store.invoicesTotal > 0" class="mt-2 flex items-center justify-between text-xs text-slate-500">
+        <span>Showing {{ invoicesPager.rangeStart }}–{{ invoicesPager.rangeEnd }} of {{ store.invoicesTotal }}</span>
+        <div class="flex gap-2">
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="invoicesPage === 0" @click="goToInvoicesPage(invoicesPage - 1)">
+            <ChevronLeft class="h-3.5 w-3.5" /> Previous
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            :disabled="invoicesPage >= invoicesPager.totalPages - 1"
+            @click="goToInvoicesPage(invoicesPage + 1)"
+          >
+            Next <ChevronRight class="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
       <form v-if="canSubmitInvoice" class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleCreateInvoice">
-        <select v-model="invoiceForm.purchaseOrderId" required aria-label="Issued PO" class="select w-auto max-w-full">
-          <option value="" disabled>Issued PO</option>
-          <option v-for="po in activePOs()" :key="po.id" :value="po.id">{{ po.poNumber }}</option>
-        </select>
+        <input v-model="invoiceForm.purchaseOrderId" required placeholder="Issued PO ID" class="input w-64" />
         <input v-model="invoiceForm.invoiceNumber" required placeholder="Invoice number" class="input" />
         <input v-model="invoiceForm.description" required placeholder="Line description" class="input" />
         <input v-model.number="invoiceForm.quantity" type="number" min="1" required placeholder="Qty" class="input w-16" />
         <input v-model.number="invoiceForm.unitPrice" type="number" min="1" required placeholder="Unit price" class="input w-24" />
         <button type="submit" class="btn btn-primary btn-sm">Submit invoice</button>
       </form>
+      <p v-if="canSubmitInvoice" class="mt-1 text-[11px] text-slate-500">
+        Enter the ID of an ISSUED purchase order — the list above may not show every issued PO once there are more than
+        {{ PAGE_SIZE }}.
+      </p>
     </div>
 
     <!-- Payment Requests -->
@@ -498,6 +599,27 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
           Execute payment
         </button>
       </div>
+      <div v-if="store.paymentRequestsTotal > 0" class="mt-3 flex items-center justify-between text-xs text-slate-500">
+        <span>Showing {{ paymentRequestsPager.rangeStart }}–{{ paymentRequestsPager.rangeEnd }} of {{ store.paymentRequestsTotal }}</span>
+        <div class="flex gap-2">
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            :disabled="paymentRequestsPage === 0"
+            @click="goToPaymentRequestsPage(paymentRequestsPage - 1)"
+          >
+            <ChevronLeft class="h-3.5 w-3.5" /> Previous
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            :disabled="paymentRequestsPage >= paymentRequestsPager.totalPages - 1"
+            @click="goToPaymentRequestsPage(paymentRequestsPage + 1)"
+          >
+            Next <ChevronRight class="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Payments -->
@@ -541,6 +663,22 @@ function verifiedInvoiceMyself(pr: PaymentRequest): boolean {
           </tr>
         </tbody>
       </table>
+      <div v-if="store.paymentsTotal > 0" class="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500">
+        <span>Showing {{ paymentsPager.rangeStart }}–{{ paymentsPager.rangeEnd }} of {{ store.paymentsTotal }}</span>
+        <div class="flex gap-2">
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="paymentsPage === 0" @click="goToPaymentsPage(paymentsPage - 1)">
+            <ChevronLeft class="h-3.5 w-3.5" /> Previous
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            :disabled="paymentsPage >= paymentsPager.totalPages - 1"
+            @click="goToPaymentsPage(paymentsPage + 1)"
+          >
+            Next <ChevronRight class="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
     </div>
 
     <ConfirmDialog

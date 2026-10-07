@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   Req,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
@@ -32,8 +33,11 @@ export class ContractsController {
   ) {}
 
   @Get()
-  list() {
-    return this.contractsService.list();
+  list(@Query('skip') skip?: string, @Query('take') take?: string) {
+    return this.contractsService.list({
+      skip: skip ? Number(skip) : undefined,
+      take: take ? Number(take) : undefined,
+    });
   }
 
   @Get(':id')

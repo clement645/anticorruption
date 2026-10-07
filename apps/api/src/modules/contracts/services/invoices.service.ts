@@ -174,13 +174,23 @@ export class InvoicesService {
     return toView(invoice);
   }
 
-  async list(status?: string): Promise<InvoiceView[]> {
-    const invoices = await this.prisma.invoice.findMany({
-      where: status ? { status: status as never } : undefined,
-      include: { items: true },
-      orderBy: { createdAt: 'desc' },
-    });
-    return invoices.map(toView);
+  async list(params: {
+    status?: string;
+    skip?: number;
+    take?: number;
+  }): Promise<{ items: InvoiceView[]; total: number }> {
+    const where = params.status ? { status: params.status as never } : undefined;
+    const [invoices, total] = await this.prisma.$transaction([
+      this.prisma.invoice.findMany({
+        where,
+        include: { items: true },
+        orderBy: { createdAt: 'desc' },
+        skip: params.skip ?? 0,
+        take: Math.min(params.take ?? 25, 100),
+      }),
+      this.prisma.invoice.count({ where }),
+    ]);
+    return { items: invoices.map(toView), total };
   }
 
   async getByIdOrThrow(id: string): Promise<InvoiceWithItems> {

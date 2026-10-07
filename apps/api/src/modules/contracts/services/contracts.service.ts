@@ -122,11 +122,22 @@ export class ContractsService {
     return toView(contract);
   }
 
-  async list(): Promise<ContractView[]> {
-    const contracts = await this.prisma.contract.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
-    return contracts.map(toView);
+  // Paginated — found during Phase 10 QA unbounded (a real contract register
+  // grows with every procurement cycle, same shape of problem risk-alerts
+  // had). See risk-alerts.service.ts for the precedent.
+  async list(params: {
+    skip?: number;
+    take?: number;
+  }): Promise<{ items: ContractView[]; total: number }> {
+    const [contracts, total] = await this.prisma.$transaction([
+      this.prisma.contract.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip: params.skip ?? 0,
+        take: Math.min(params.take ?? 25, 100),
+      }),
+      this.prisma.contract.count(),
+    ]);
+    return { items: contracts.map(toView), total };
   }
 
   async getByIdOrThrow(id: string): Promise<Contract> {

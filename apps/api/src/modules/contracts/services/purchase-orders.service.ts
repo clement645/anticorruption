@@ -89,11 +89,19 @@ export class PurchaseOrdersService {
     return toView(po);
   }
 
-  async list(): Promise<PurchaseOrderView[]> {
-    const pos = await this.prisma.purchaseOrder.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
-    return pos.map(toView);
+  async list(params: {
+    skip?: number;
+    take?: number;
+  }): Promise<{ items: PurchaseOrderView[]; total: number }> {
+    const [pos, total] = await this.prisma.$transaction([
+      this.prisma.purchaseOrder.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip: params.skip ?? 0,
+        take: Math.min(params.take ?? 25, 100),
+      }),
+      this.prisma.purchaseOrder.count(),
+    ]);
+    return { items: pos.map(toView), total };
   }
 
   async getByIdOrThrow(id: string): Promise<PurchaseOrder> {

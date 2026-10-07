@@ -8,6 +8,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   Req,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
@@ -31,8 +32,11 @@ export class PaymentRequestsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
   @Get()
-  list() {
-    return this.paymentsService.listRequests();
+  list(@Query('skip') skip?: string, @Query('take') take?: string) {
+    return this.paymentsService.listRequests({
+      skip: skip ? Number(skip) : undefined,
+      take: take ? Number(take) : undefined,
+    });
   }
 
   @Get(':id')
@@ -77,8 +81,11 @@ export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
   @Get()
-  list() {
-    return this.paymentsService.listPayments();
+  list(@Query('skip') skip?: string, @Query('take') take?: string) {
+    return this.paymentsService.listPayments({
+      skip: skip ? Number(skip) : undefined,
+      take: take ? Number(take) : undefined,
+    });
   }
 
   @Get(':id')

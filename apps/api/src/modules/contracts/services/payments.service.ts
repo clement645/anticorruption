@@ -97,12 +97,20 @@ export class PaymentsService {
     private readonly allocationsService: AllocationsService,
   ) {}
 
-  async listRequests(): Promise<PaymentRequestView[]> {
-    const requests = await this.prisma.paymentRequest.findMany({
-      include: { approvals: true },
-      orderBy: { createdAt: 'desc' },
-    });
-    return requests.map(toRequestView);
+  async listRequests(params: {
+    skip?: number;
+    take?: number;
+  }): Promise<{ items: PaymentRequestView[]; total: number }> {
+    const [requests, total] = await this.prisma.$transaction([
+      this.prisma.paymentRequest.findMany({
+        include: { approvals: true },
+        orderBy: { createdAt: 'desc' },
+        skip: params.skip ?? 0,
+        take: Math.min(params.take ?? 25, 100),
+      }),
+      this.prisma.paymentRequest.count(),
+    ]);
+    return { items: requests.map(toRequestView), total };
   }
 
   async getRequestByIdOrThrow(
@@ -437,12 +445,21 @@ export class PaymentsService {
     }
   }
 
-  async listPayments(): Promise<PaymentView[]> {
-    const payments = await this.prisma.payment.findMany({
-      where: { expenditureId: { not: null } },
-      orderBy: { executedAt: 'desc' },
-    });
-    return payments.map(toPaymentView);
+  async listPayments(params: {
+    skip?: number;
+    take?: number;
+  }): Promise<{ items: PaymentView[]; total: number }> {
+    const where = { expenditureId: { not: null } };
+    const [payments, total] = await this.prisma.$transaction([
+      this.prisma.payment.findMany({
+        where,
+        orderBy: { executedAt: 'desc' },
+        skip: params.skip ?? 0,
+        take: Math.min(params.take ?? 25, 100),
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+    return { items: payments.map(toPaymentView), total };
   }
 
   async getPaymentByIdOrThrow(id: string): Promise<Payment> {

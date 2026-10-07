@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   Req,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
@@ -31,8 +32,11 @@ export class PurchaseOrdersController {
   ) {}
 
   @Get()
-  list() {
-    return this.purchaseOrdersService.list();
+  list(@Query('skip') skip?: string, @Query('take') take?: string) {
+    return this.purchaseOrdersService.list({
+      skip: skip ? Number(skip) : undefined,
+      take: take ? Number(take) : undefined,
+    });
   }
 
   @Get(':id')

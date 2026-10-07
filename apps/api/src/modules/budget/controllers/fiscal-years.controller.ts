@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { FiscalYearsService } from '../services/fiscal-years.service';
@@ -19,8 +20,11 @@ export class FiscalYearsController {
 
   @Get()
   @RequirePermissions('budget:read')
-  list() {
-    return this.fiscalYearsService.list();
+  list(@Query('skip') skip?: string, @Query('take') take?: string) {
+    return this.fiscalYearsService.list({
+      skip: skip ? Number(skip) : undefined,
+      take: take ? Number(take) : undefined,
+    });
   }
 
   @Post()
