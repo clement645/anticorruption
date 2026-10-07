@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { reactive } from 'vue'
 import { useAuditStore } from '../stores/audit'
+import PageHeader from '../components/ui/PageHeader.vue'
+import AlertBanner from '../components/ui/AlertBanner.vue'
 
 const audit = useAuditStore()
 
@@ -36,14 +38,10 @@ function formatEventType(eventType: string): string {
 
 <template>
   <section class="mx-auto max-w-5xl px-4 py-10">
-    <div class="page-header">
-      <h1 class="page-title">Auditor Portal</h1>
-      <p class="page-subtitle">
-        Transaction reconstruction: the full, independently re-verified audit history of any one
-        resource in the system, plus its blockchain anchor status — not a raw event dump, a
-        forensic case file.
-      </p>
-    </div>
+    <PageHeader
+      title="Auditor portal"
+      subtitle="Transaction reconstruction: the full, independently re-verified audit history of any one resource in the system, plus its blockchain anchor status — not a raw event dump, a forensic case file."
+    />
 
     <div class="mt-6 card p-6">
       <h2 class="section-title">Reconstruct a resource's history</h2>
@@ -81,9 +79,7 @@ function formatEventType(eventType: string): string {
       </p>
     </div>
 
-    <p v-if="audit.reconstructError" class="mt-4 alert-error">
-      {{ audit.reconstructError }}
-    </p>
+    <AlertBanner v-if="audit.reconstructError" class="mt-4">{{ audit.reconstructError }}</AlertBanner>
 
     <div v-if="audit.reconstruction" class="mt-6 card p-6">
       <div class="flex items-center justify-between">

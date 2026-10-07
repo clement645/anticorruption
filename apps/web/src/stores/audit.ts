@@ -60,7 +60,12 @@ interface AuditState {
   reconstruction: ReconstructionResult | null
   reconstructing: boolean
   reconstructError: string | null
+  eventVerifications: Record<string, EventVerification>
+  verifyingEventId: string | null
+  verifyEventErrors: Record<string, string>
 }
+
+const PAGE_SIZE = 25
 
 export const useAuditStore = defineStore('audit', {
   state: (): AuditState => ({
@@ -74,19 +79,37 @@ export const useAuditStore = defineStore('audit', {
     reconstruction: null,
     reconstructing: false,
     reconstructError: null,
+    eventVerifications: {},
+    verifyingEventId: null,
+    verifyEventErrors: {},
   }),
   actions: {
-    async fetchEvents() {
+    /** `more: true` appends the next page instead of replacing the list — backs the "Load more" button. */
+    async fetchEvents(options: { more?: boolean } = {}) {
       this.loading = true
       this.error = null
       try {
-        const result = await apiGet<AuditEventList>('/audit/events?take=25')
-        this.events = result.items
+        const skip = options.more ? this.events.length : 0
+        const result = await apiGet<AuditEventList>(`/audit/events?take=${PAGE_SIZE}&skip=${skip}`)
+        this.events = options.more ? [...this.events, ...result.items] : result.items
         this.total = result.total
       } catch {
         this.error = 'Unable to load the audit trail'
       } finally {
         this.loading = false
+      }
+    },
+
+    /** Independently re-verifies one event's hash chain, signature, and blockchain anchor — same checks `reconstruct()` runs, scoped to a single row. */
+    async verifyEvent(id: string) {
+      this.verifyingEventId = id
+      delete this.verifyEventErrors[id]
+      try {
+        this.eventVerifications[id] = await apiGet<EventVerification>(`/audit/events/${id}/verify`)
+      } catch {
+        this.verifyEventErrors[id] = 'Unable to verify this event'
+      } finally {
+        this.verifyingEventId = null
       }
     },
 
