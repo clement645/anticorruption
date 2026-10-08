@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useTransparencyStore } from '../stores/transparency'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import AlertBanner from '../components/ui/AlertBanner.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import SkeletonRows from '../components/ui/SkeletonRows.vue'
 
 const store = useTransparencyStore()
 
@@ -34,12 +38,6 @@ async function openTender(id: string) {
 async function handleVerify() {
   if (!hashInput.value.trim()) return
   await store.verifyHash(hashInput.value.trim())
-}
-
-function statusColor(status: string): string {
-  if (['COMPLETED', 'VERIFIED', 'ACTIVE', 'AWARDED', 'MATCHED'].includes(status)) return 'text-emerald-700'
-  if (['CANCELLED', 'REJECTED', 'SUSPENDED', 'BLACKLISTED'].includes(status)) return 'text-red-700'
-  return 'text-slate-600'
 }
 </script>
 
@@ -76,9 +74,7 @@ function statusColor(status: string): string {
         </button>
       </nav>
 
-      <p v-if="store.error" class="mt-4 alert-error">
-        {{ store.error }}
-      </p>
+      <AlertBanner v-if="store.error" class="mt-4">{{ store.error }}</AlertBanner>
 
     <!-- Projects -->
     <div v-if="activeTab === 'projects'" class="mt-6">
@@ -87,15 +83,16 @@ function statusColor(status: string): string {
         <button type="submit" class="btn btn-primary btn-sm">Search</button>
       </form>
 
-      <ul class="mt-4 divide-y divide-slate-100 card">
+      <SkeletonRows v-if="store.loading" :rows="3" :columns="2" class="mt-4 card" />
+      <EmptyState v-else-if="store.projects.length === 0" class="mt-4 card" title="No projects found" />
+      <ul v-else class="mt-4 divide-y divide-slate-100 card">
         <li v-for="p in store.projects" :key="p.id" class="p-3 text-sm">
           <button type="button" class="text-left font-medium text-slate-900 hover:underline" @click="openProject(p.id)">
             {{ p.name }}
           </button>
-          <span class="ml-2 text-xs" :class="statusColor(p.status)">{{ p.status }}</span>
-          <p class="text-xs text-slate-500">{{ p.organizationName }} · {{ p.location ?? 'location not recorded' }}</p>
+          <StatusBadge class="ml-2" :status="p.status" />
+          <p class="mt-0.5 text-xs text-slate-500">{{ p.organizationName }} · {{ p.location ?? 'location not recorded' }}</p>
         </li>
-        <li v-if="store.projects.length === 0" class="p-3 text-sm text-slate-500">No projects found.</li>
       </ul>
 
       <div v-if="store.projectDetail && selectedProjectId" class="mt-4 card p-4 text-sm">
@@ -107,10 +104,11 @@ function statusColor(status: string): string {
         </p>
 
         <h3 class="mt-3 text-xs font-medium uppercase text-slate-500">Milestones</h3>
-        <ul class="mt-1 space-y-1">
-          <li v-for="m in store.projectDetail.milestones" :key="m.sequenceNumber" class="text-xs">
-            #{{ m.sequenceNumber }} {{ m.title }} — <span :class="statusColor(m.status)">{{ m.status }}</span>
-            ({{ m.plannedAmount }}, due {{ m.plannedDate.slice(0, 10) }})
+        <ul class="mt-1 space-y-1.5">
+          <li v-for="m in store.projectDetail.milestones" :key="m.sequenceNumber" class="flex flex-wrap items-center gap-1.5 text-xs">
+            <span>#{{ m.sequenceNumber }} {{ m.title }}</span>
+            <StatusBadge :status="m.status" />
+            <span class="text-slate-500">({{ m.plannedAmount }}, due {{ m.plannedDate.slice(0, 10) }})</span>
           </li>
         </ul>
 
@@ -133,15 +131,16 @@ function statusColor(status: string): string {
       </form>
       <p class="mt-1 text-[11px] text-slate-500">Only published tenders appear here — drafts are internal.</p>
 
-      <ul class="mt-4 divide-y divide-slate-100 card">
+      <SkeletonRows v-if="store.loading" :rows="3" :columns="2" class="mt-4 card" />
+      <EmptyState v-else-if="store.tenders.length === 0" class="mt-4 card" title="No tenders found" />
+      <ul v-else class="mt-4 divide-y divide-slate-100 card">
         <li v-for="t in store.tenders" :key="t.id" class="p-3 text-sm">
           <button type="button" class="text-left font-medium text-slate-900 hover:underline" @click="openTender(t.id)">
             {{ t.title }}
           </button>
-          <span class="ml-2 text-xs" :class="statusColor(t.status)">{{ t.status }}</span>
-          <p class="text-xs text-slate-500">{{ t.tenderNumber }} · closes {{ t.closingDate.slice(0, 10) }}</p>
+          <StatusBadge class="ml-2" :status="t.status" />
+          <p class="mt-0.5 text-xs text-slate-500">{{ t.tenderNumber }} · closes {{ t.closingDate.slice(0, 10) }}</p>
         </li>
-        <li v-if="store.tenders.length === 0" class="p-3 text-sm text-slate-500">No tenders found.</li>
       </ul>
 
       <div v-if="store.tenderDetail && selectedTenderId" class="mt-4 card p-4 text-sm">
@@ -178,14 +177,17 @@ function statusColor(status: string): string {
             </tr>
           </thead>
           <tbody>
+            <tr v-if="store.loading">
+              <td colspan="4" class="p-0"><SkeletonRows :rows="3" :columns="4" /></td>
+            </tr>
+            <tr v-else-if="store.suppliers.length === 0">
+              <td colspan="4" class="p-0"><EmptyState title="No suppliers found" /></td>
+            </tr>
             <tr v-for="s in store.suppliers" :key="s.id">
               <td>{{ s.name }}</td>
               <td class="font-mono">{{ s.registrationNumber }}</td>
               <td>{{ s.county ?? '—' }}</td>
-              <td :class="statusColor(s.status)">{{ s.status }}</td>
-            </tr>
-            <tr v-if="store.suppliers.length === 0">
-              <td colspan="4" class="text-center text-slate-500">No suppliers found.</td>
+              <td><StatusBadge :status="s.status" /></td>
             </tr>
           </tbody>
         </table>
@@ -207,6 +209,12 @@ function statusColor(status: string): string {
             </tr>
           </thead>
           <tbody>
+            <tr v-if="store.loading">
+              <td colspan="6" class="p-0"><SkeletonRows :rows="3" :columns="6" /></td>
+            </tr>
+            <tr v-else-if="store.budgetLines.length === 0">
+              <td colspan="6" class="p-0"><EmptyState title="No public budget data yet" /></td>
+            </tr>
             <tr v-for="(b, i) in store.budgetLines" :key="i">
               <td>{{ b.organizationName }}</td>
               <td>{{ b.fiscalYearName }}</td>
@@ -214,9 +222,6 @@ function statusColor(status: string): string {
               <td>{{ b.authorizedAmount }}</td>
               <td>{{ b.committedAmount }}</td>
               <td>{{ b.spentAmount }}</td>
-            </tr>
-            <tr v-if="store.budgetLines.length === 0">
-              <td colspan="6" class="text-center text-slate-500">No public budget data yet.</td>
             </tr>
           </tbody>
         </table>

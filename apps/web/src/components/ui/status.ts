@@ -22,6 +22,7 @@ const STATUSES: Record<string, StatusDefinition> = {
   REJECTED: { label: 'Rejected', tone: 'danger' },
   ACTIVE: { label: 'Active', tone: 'success' },
   SUSPENDED: { label: 'Suspended', tone: 'danger' },
+  BLACKLISTED: { label: 'Blacklisted', tone: 'critical' },
   LOCKED: { label: 'Locked', tone: 'warning' },
   COMPLETED: { label: 'Completed', tone: 'success' },
   CLOSED: { label: 'Closed', tone: 'neutral' },
@@ -47,6 +48,14 @@ const STATUSES: Record<string, StatusDefinition> = {
   OPEN: { label: 'Open', tone: 'warning' },
   CONFIRMED: { label: 'Confirmed', tone: 'danger' },
   DISMISSED: { label: 'Dismissed', tone: 'neutral' },
+  // A whistleblower investigation's finding — substantiating a report is the
+  // accountability system working, not a bad outcome, hence success here.
+  SUBSTANTIATED: { label: 'Substantiated', tone: 'success' },
+  UNSUBSTANTIATED: { label: 'Unsubstantiated', tone: 'danger' },
+  // A toggleable security/feature state (MFA, etc.) — distinct wording from
+  // ACTIVE/SUSPENDED above, which describe an account, not a setting.
+  ENABLED: { label: 'Enabled', tone: 'success' },
+  DISABLED: { label: 'Not enabled', tone: 'warning' },
   LOW: { label: 'Low', tone: 'success' },
   MEDIUM: { label: 'Medium', tone: 'warning' },
   HIGH: { label: 'High', tone: 'danger' },

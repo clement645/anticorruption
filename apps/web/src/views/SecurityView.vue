@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import QRCode from 'qrcode'
-import { ShieldCheck, ShieldAlert, Copy, Check, Download } from '@lucide/vue'
+import { Copy, Check, Download } from '@lucide/vue'
 import { useAuthStore } from '../stores/auth'
 import { apiGet, apiPost, ApiError } from '../api/client'
+import PageHeader from '../components/ui/PageHeader.vue'
+import AlertBanner from '../components/ui/AlertBanner.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
 
 const auth = useAuthStore()
 
@@ -145,14 +148,11 @@ onMounted(loadStatus)
 
 <template>
   <div class="mx-auto max-w-4xl px-4 py-8 sm:px-6">
-    <div class="mb-6">
-      <h1 class="page-title">Security</h1>
-      <p class="page-subtitle">Protect your account. Changes here take effect immediately.</p>
-    </div>
+    <PageHeader title="Security" subtitle="Protect your account. Changes here take effect immediately." />
 
-    <div class="space-y-6">
+    <div class="mt-6 space-y-6">
       <!-- Account -->
-      <section class="card" aria-labelledby="account-heading">
+      <section class="card p-6" aria-labelledby="account-heading">
         <h2 id="account-heading" class="text-base font-semibold">Account</h2>
         <dl class="mt-4 grid gap-4 text-sm sm:grid-cols-2">
           <div>
@@ -167,7 +167,7 @@ onMounted(loadStatus)
       </section>
 
       <!-- Authenticator -->
-      <section class="card" aria-labelledby="mfa-heading">
+      <section class="card p-6" aria-labelledby="mfa-heading">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 id="mfa-heading" class="text-base font-semibold">Authenticator app</h2>
@@ -176,30 +176,18 @@ onMounted(loadStatus)
             </p>
           </div>
 
-          <span
-            v-if="!loading && status"
-            class="badge"
-            :class="mfaEnabled ? 'badge-success' : 'badge-warning'"
-            role="status"
-          >
-            <ShieldCheck v-if="mfaEnabled" class="h-3.5 w-3.5" />
-            <ShieldAlert v-else class="h-3.5 w-3.5" />
-            {{ mfaEnabled ? 'Enabled' : 'Not enabled' }}
-          </span>
+          <StatusBadge v-if="!loading && status" :status="mfaEnabled ? 'ENABLED' : 'DISABLED'" role="status" />
         </div>
 
-        <p v-if="loadError" class="alert-error mt-4" role="alert">{{ loadError }}</p>
+        <AlertBanner v-if="loadError" class="mt-4">{{ loadError }}</AlertBanner>
         <p v-else-if="loading" class="mt-4 text-sm text-slate-500">Checking status…</p>
 
         <!-- Backup codes, shown once -->
         <div v-else-if="backupCodes" class="mt-6 space-y-4" aria-live="polite">
-          <div class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            <p class="font-semibold">Save these recovery codes now.</p>
-            <p class="mt-1">
-              They are shown only once. Each code works once, in place of an authenticator code, if you lose
-              your device. We cannot show them again.
-            </p>
-          </div>
+          <AlertBanner tone="warning" title="Save these recovery codes now.">
+            They are shown only once. Each code works once, in place of an authenticator code, if you lose
+            your device. We cannot show them again.
+          </AlertBanner>
           <ol class="grid grid-cols-2 gap-2 font-mono text-sm sm:grid-cols-5">
             <li v-for="c in backupCodes" :key="c" class="rounded-md border border-slate-200 bg-white px-3 py-2">
               {{ c }}

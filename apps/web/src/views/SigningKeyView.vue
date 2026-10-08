@@ -4,6 +4,9 @@ import { KeyRound, ShieldCheck, AlertTriangle, CheckCircle2, Loader2 } from '@lu
 import { useAuthStore } from '../stores/auth'
 import { useSigningKeyStore } from '../stores/signingKey'
 import { loadSigningKey } from '../lib/signing'
+import PageHeader from '../components/ui/PageHeader.vue'
+import AlertBanner from '../components/ui/AlertBanner.vue'
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
 
 const auth = useAuthStore()
 const signingKey = useSigningKeyStore()
@@ -33,13 +36,10 @@ async function handleEnroll() {
 
 <template>
   <section class="mx-auto max-w-2xl px-4 py-8 sm:px-6">
-    <div class="page-header">
-      <h1 class="page-title">Signing Key</h1>
-      <p class="page-subtitle">
-        Your personal cryptographic key for authorizing high-stakes actions (like budget
-        approvals) — a record only you could have produced.
-      </p>
-    </div>
+    <PageHeader
+      title="Signing key"
+      subtitle="Your personal cryptographic key for authorizing high-stakes actions (like budget approvals) — a record only you could have produced."
+    />
 
     <div class="mt-6 card p-6">
       <div v-if="signingKey.loading && !signingKey.status" class="text-sm text-slate-500">
@@ -86,9 +86,7 @@ async function handleEnroll() {
           </div>
         </div>
 
-        <p v-if="signingKey.error" class="mt-4 alert-error">
-          {{ signingKey.error }}
-        </p>
+        <AlertBanner v-if="signingKey.error" class="mt-4">{{ signingKey.error }}</AlertBanner>
 
         <div class="mt-5">
           <button
@@ -103,24 +101,23 @@ async function handleEnroll() {
             Generate signing key
           </button>
 
-          <button
-            v-else-if="!confirmRotate"
-            type="button"
-            class="btn btn-secondary"
-            @click="confirmRotate = true"
-          >
+          <button v-else type="button" class="btn btn-secondary" @click="confirmRotate = true">
             Generate new key
           </button>
-          <div v-else class="flex items-center gap-2">
-            <button type="button" class="btn btn-danger" :disabled="enrolling" @click="handleEnroll">
-              <Loader2 v-if="enrolling" class="h-4 w-4 animate-spin" />
-              Confirm — replace key
-            </button>
-            <button type="button" class="btn btn-ghost" @click="confirmRotate = false">Cancel</button>
-          </div>
         </div>
       </template>
     </div>
+
+    <ConfirmDialog
+      :open="confirmRotate"
+      title="Replace your signing key?"
+      message="The key currently enrolled will stop working for new signatures — anything already signed with it stays verifiable. This cannot be undone from this screen."
+      confirm-label="Replace key"
+      tone="danger"
+      :busy="enrolling"
+      @confirm="handleEnroll"
+      @cancel="confirmRotate = false"
+    />
 
     <div class="mt-4 flex items-start gap-2 text-xs text-slate-500">
       <ShieldCheck class="mt-0.5 h-4 w-4 flex-none" />

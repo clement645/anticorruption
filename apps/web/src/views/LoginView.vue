@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ShieldCheck, Loader2 } from '@lucide/vue'
 import { useAuthStore } from '../stores/auth'
+import AlertBanner from '../components/ui/AlertBanner.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -114,9 +115,7 @@ async function submitMfa() {
         <h2 class="font-serif text-2xl font-semibold tracking-tight text-slate-900">Sign in</h2>
         <p class="mt-1 text-sm text-slate-500">Enter your credentials to access your portal.</p>
 
-        <p v-if="notice" class="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900" role="status">
-          {{ notice }}
-        </p>
+        <AlertBanner v-if="notice" tone="success" class="mt-4">{{ notice }}</AlertBanner>
 
         <div class="card mt-6 p-6 sm:p-7">
           <form
@@ -147,7 +146,7 @@ async function submitMfa() {
               />
             </div>
 
-            <p v-if="localError" class="alert-error">{{ localError }}</p>
+            <AlertBanner v-if="localError">{{ localError }}</AlertBanner>
 
             <button type="submit" :disabled="submitting" class="btn btn-primary w-full">
               <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
@@ -168,7 +167,7 @@ async function submitMfa() {
               />
             </div>
 
-            <p v-if="localError" class="alert-error">{{ localError }}</p>
+            <AlertBanner v-if="localError">{{ localError }}</AlertBanner>
 
             <button type="submit" :disabled="submitting" class="btn btn-primary w-full">
               <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
@@ -209,7 +208,7 @@ async function submitMfa() {
               />
             </div>
 
-            <p v-if="localError" class="alert-error">{{ localError }}</p>
+            <AlertBanner v-if="localError">{{ localError }}</AlertBanner>
 
             <button type="submit" :disabled="submitting" class="btn btn-primary w-full">
               <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />

@@ -1,11 +1,22 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useWhistleblowerStore } from '../stores/whistleblower'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import AlertBanner from '../components/ui/AlertBanner.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import SkeletonRows from '../components/ui/SkeletonRows.vue'
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
+import { notify } from '../components/ui/toast'
 
 const store = useWhistleblowerStore()
 const selectedId = ref<string | null>(null)
 const statusFilter = ref('')
 const updateMessage = ref('')
+// Only the terminal verdict needs a confirmation — assigning yourself and
+// starting a review are both low-stakes and easily reversed.
+const pendingVerdict = ref<'SUBSTANTIATED' | 'UNSUBSTANTIATED' | null>(null)
+const verdictBusy = ref(false)
 
 onMounted(() => {
   void store.fetchReports()
@@ -27,7 +38,23 @@ async function handleAssign() {
 
 async function handleChangeStatus(status: string) {
   if (!selectedId.value) return
+  if (status === 'SUBSTANTIATED' || status === 'UNSUBSTANTIATED') {
+    pendingVerdict.value = status
+    return
+  }
   await store.changeStatus(selectedId.value, status)
+}
+
+async function confirmVerdict() {
+  if (!selectedId.value || !pendingVerdict.value) return
+  verdictBusy.value = true
+  try {
+    await store.changeStatus(selectedId.value, pendingVerdict.value)
+    notify(`Marked ${pendingVerdict.value.toLowerCase()}.`)
+    pendingVerdict.value = null
+  } finally {
+    verdictBusy.value = false
+  }
 }
 
 async function handlePostUpdate() {
@@ -49,17 +76,12 @@ function nextStatuses(current: string): string[] {
 
 <template>
   <section class="mx-auto max-w-5xl px-4 py-10">
-    <div class="page-header">
-      <h1 class="page-title">Whistleblower Investigations</h1>
-      <p class="page-subtitle">
-        Restricted to Auditor / Internal Auditor — the reporter's identity is never collected
-        unless they chose to leave contact information.
-      </p>
-    </div>
+    <PageHeader
+      title="Whistleblower investigations"
+      subtitle="Restricted to Auditor / Internal Auditor — the reporter's identity is never collected unless they chose to leave contact information."
+    />
 
-    <p v-if="store.error" class="mt-4 alert-error">
-      {{ store.error }}
-    </p>
+    <AlertBanner v-if="store.error" class="mt-4">{{ store.error }}</AlertBanner>
 
     <div class="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
       <div class="card p-4">
@@ -73,7 +95,9 @@ function nextStatuses(current: string): string[] {
             <option value="UNSUBSTANTIATED">Unsubstantiated</option>
           </select>
         </div>
-        <ul class="mt-3 divide-y divide-slate-100">
+        <SkeletonRows v-if="store.loading && store.reports.length === 0" :rows="3" :columns="1" class="mt-3" />
+        <EmptyState v-else-if="store.reports.length === 0" class="mt-3" title="No reports" />
+        <ul v-else class="mt-3 divide-y divide-slate-100">
           <li v-for="r in store.reports" :key="r.id" class="py-2">
             <button
               type="button"
@@ -81,43 +105,20 @@ function nextStatuses(current: string): string[] {
               :class="{ 'font-medium': selectedId === r.id }"
               @click="open(r.id)"
             >
-              <div class="flex items-center justify-between">
+              <div class="flex items-center justify-between gap-2">
                 <span>{{ formatCategory(r.category) }}</span>
-                <span
-                  class="badge"
-                  :class="{
-                    'badge-neutral': r.status === 'SUBMITTED',
-                    'badge-warning': r.status === 'UNDER_REVIEW',
-                    'badge-success': r.status === 'SUBSTANTIATED',
-                    'badge-danger': r.status === 'UNSUBSTANTIATED',
-                  }"
-                >
-                  {{ r.status }}
-                </span>
+                <StatusBadge :status="r.status" />
               </div>
               <p class="mt-1 line-clamp-2 text-slate-500">{{ r.description }}</p>
             </button>
-          </li>
-          <li v-if="store.reports.length === 0" class="py-6 text-center text-xs text-slate-500">
-            No reports.
           </li>
         </ul>
       </div>
 
       <div v-if="store.reportDetail" class="card p-4 text-sm">
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between gap-2">
           <h2 class="section-title">{{ formatCategory(store.reportDetail.category) }}</h2>
-          <span
-            class="badge"
-            :class="{
-              'badge-neutral': store.reportDetail.status === 'SUBMITTED',
-              'badge-warning': store.reportDetail.status === 'UNDER_REVIEW',
-              'badge-success': store.reportDetail.status === 'SUBSTANTIATED',
-              'badge-danger': store.reportDetail.status === 'UNSUBSTANTIATED',
-            }"
-          >
-            {{ store.reportDetail.status }}
-          </span>
+          <StatusBadge :status="store.reportDetail.status" />
         </div>
         <p class="mt-2 text-slate-600">{{ store.reportDetail.description }}</p>
         <p v-if="store.reportDetail.contact" class="mt-2 text-xs text-slate-500">
@@ -172,5 +173,20 @@ function nextStatuses(current: string): string[] {
         Select a report to view details.
       </div>
     </div>
+
+    <ConfirmDialog
+      :open="pendingVerdict !== null"
+      :title="pendingVerdict === 'SUBSTANTIATED' ? 'Mark this report substantiated?' : 'Mark this report unsubstantiated?'"
+      :message="
+        pendingVerdict === 'SUBSTANTIATED'
+          ? 'The investigation found evidence supporting the report. This verdict is recorded against your identity and closes active review.'
+          : 'The investigation found no supporting evidence. This verdict is recorded against your identity and closes active review.'
+      "
+      :confirm-label="pendingVerdict === 'SUBSTANTIATED' ? 'Mark substantiated' : 'Mark unsubstantiated'"
+      :tone="pendingVerdict === 'UNSUBSTANTIATED' ? 'danger' : 'default'"
+      :busy="verdictBusy"
+      @confirm="confirmVerdict"
+      @cancel="pendingVerdict = null"
+    />
   </section>
 </template>

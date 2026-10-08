@@ -1,8 +1,15 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useSupplierStore } from '../stores/supplier'
+import { ApiError } from '../api/client'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import AlertBanner from '../components/ui/AlertBanner.vue'
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import { notify } from '../components/ui/toast'
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -148,31 +155,70 @@ async function handleRecordRisk() {
   riskForm.factorsCsv = ''
   riskForm.notes = ''
 }
+
+// Suspend and blacklist both interrupt a supplier's ability to win further
+// work — reactivate only reverses that, so it stays a single click.
+type PendingSupplierAction = 'suspend' | 'blacklist' | null
+const pendingAction = ref<PendingSupplierAction>(null)
+const actionBusy = ref(false)
+
+const confirmTitle = computed(() =>
+  pendingAction.value === 'suspend' ? 'Suspend this supplier?' : 'Blacklist this supplier?',
+)
+const confirmMessage = computed(() => {
+  if (!supplier.profile) return ''
+  if (pendingAction.value === 'suspend') {
+    return `${supplier.profile.name} will not be eligible for new tenders or awards until reactivated.`
+  }
+  if (pendingAction.value === 'blacklist') {
+    return `${supplier.profile.name} will be permanently barred from future tenders and awards. This is a serious action — only reverse it by contacting an administrator.`
+  }
+  return ''
+})
+
+async function confirmAction() {
+  if (!pendingAction.value) return
+  actionBusy.value = true
+  supplier.error = null
+  try {
+    if (pendingAction.value === 'suspend') {
+      await supplier.suspend(supplierId)
+      notify('Supplier suspended.')
+    } else {
+      await supplier.blacklist(supplierId)
+      notify('Supplier blacklisted.')
+    }
+    pendingAction.value = null
+  } catch (err) {
+    supplier.error = err instanceof ApiError ? err.message : 'That action did not complete. Nothing was changed.'
+  } finally {
+    actionBusy.value = false
+  }
+}
+
+async function handleReactivate() {
+  supplier.error = null
+  try {
+    await supplier.reactivate(supplierId)
+    notify('Supplier reactivated.')
+  } catch (err) {
+    supplier.error = err instanceof ApiError ? err.message : 'Unable to reactivate the supplier.'
+  }
+}
 </script>
 
 <template>
   <section class="mx-auto max-w-4xl px-4 py-10">
     <router-link to="/procurement" class="text-xs text-slate-500 hover:text-slate-900">&larr; Back to Procurement</router-link>
 
-    <div v-if="supplier.error" class="mt-4 alert-error">
-      {{ supplier.error }}
-    </div>
+    <AlertBanner v-if="supplier.error" class="mt-4">{{ supplier.error }}</AlertBanner>
 
     <div v-if="supplier.profile" class="mt-2">
-      <div class="flex items-center gap-3">
-        <h1 class="page-title">{{ supplier.profile.name }}</h1>
-        <span
-          class="badge"
-          :class="{
-            'badge-success': supplier.profile.status === 'ACTIVE',
-            'badge-warning': supplier.profile.status === 'SUSPENDED',
-            'badge-danger': supplier.profile.status === 'BLACKLISTED',
-          }"
-        >
-          {{ supplier.profile.status }}
-        </span>
-      </div>
-      <p class="mt-1 text-sm text-slate-500">Registration No. {{ supplier.profile.registrationNumber }}</p>
+      <PageHeader :title="supplier.profile.name" :subtitle="`Registration No. ${supplier.profile.registrationNumber}`">
+        <template #actions>
+          <StatusBadge :status="supplier.profile.status" />
+        </template>
+      </PageHeader>
 
       <!-- Profile -->
       <div class="mt-6 card p-6">
@@ -215,21 +261,21 @@ async function handleRecordRisk() {
             <button
               v-if="supplier.profile.status === 'ACTIVE'"
               class="btn btn-secondary btn-sm text-amber-800"
-              @click="supplier.suspend(supplierId)"
+              @click="pendingAction = 'suspend'"
             >
               Suspend
             </button>
             <button
               v-if="supplier.profile.status === 'SUSPENDED'"
               class="btn btn-secondary btn-sm text-emerald-800"
-              @click="supplier.reactivate(supplierId)"
+              @click="handleReactivate"
             >
               Reactivate
             </button>
             <button
               v-if="supplier.profile.status !== 'BLACKLISTED'"
               class="btn btn-danger btn-sm"
-              @click="supplier.blacklist(supplierId)"
+              @click="pendingAction = 'blacklist'"
             >
               Blacklist
             </button>
@@ -252,12 +298,20 @@ async function handleRecordRisk() {
             </tr>
           </thead>
           <tbody>
+            <tr v-if="supplier.owners.length === 0">
+              <td colspan="5" class="p-0"><EmptyState title="No beneficial owners recorded yet" /></td>
+            </tr>
             <tr v-for="owner in supplier.owners" :key="owner.id" class="border-t border-slate-100">
               <td class="py-1 pr-2">{{ owner.fullName }}</td>
               <td class="py-1 pr-2">{{ owner.nationalIdOrPassport }}</td>
               <td class="py-1 pr-2">{{ owner.ownershipPercentage }}%</td>
               <td class="py-1 pr-2">
-                <span v-if="owner.isPoliticallyExposedPerson" class="badge badge-warning">PEP</span>
+                <span
+                  v-if="owner.isPoliticallyExposedPerson"
+                  class="inline-flex items-center rounded-full bg-warning-soft px-2 py-0.5 text-xs font-medium text-warning ring-1 ring-inset ring-warning/25"
+                >
+                  PEP
+                </span>
               </td>
               <td class="py-1">
                 <button v-if="canManage" class="btn btn-ghost btn-sm text-red-700" @click="supplier.removeOwner(supplierId, owner.id)">
@@ -296,21 +350,15 @@ async function handleRecordRisk() {
             </tr>
           </thead>
           <tbody>
+            <tr v-if="supplier.documents.length === 0">
+              <td colspan="5" class="p-0"><EmptyState title="No compliance documents uploaded yet" /></td>
+            </tr>
             <tr v-for="doc in supplier.documents" :key="doc.id" class="border-t border-slate-100">
               <td class="py-1 pr-2">{{ doc.documentType }}</td>
               <td class="py-1 pr-2">{{ doc.fileName }}</td>
               <td class="py-1 pr-2 font-mono text-[10px]">{{ doc.fileHash.slice(0, 16) }}…</td>
               <td class="py-1 pr-2">
-                <span
-                  class="badge"
-                  :class="{
-                    'badge-warning': doc.status === 'PENDING',
-                    'badge-success': doc.status === 'VERIFIED',
-                    'badge-danger': doc.status === 'REJECTED',
-                  }"
-                >
-                  {{ doc.status }}
-                </span>
+                <StatusBadge :status="doc.status" />
               </td>
               <td class="py-1">
                 <div v-if="doc.status === 'PENDING' && canVerify" class="flex items-center gap-1">
@@ -349,16 +397,7 @@ async function handleRecordRisk() {
       <div v-if="canReadSensitive" class="mt-6 card p-6">
         <h2 class="section-title">Risk Profile</h2>
         <div v-if="supplier.currentRisk" class="mt-2 flex items-center gap-3 text-xs">
-          <span
-            class="badge"
-            :class="{
-              'badge-success': supplier.currentRisk.riskLevel === 'LOW',
-              'badge-warning': supplier.currentRisk.riskLevel === 'MEDIUM',
-              'badge-danger': supplier.currentRisk.riskLevel === 'HIGH' || supplier.currentRisk.riskLevel === 'CRITICAL',
-            }"
-          >
-            {{ supplier.currentRisk.riskLevel }}
-          </span>
+          <StatusBadge :status="supplier.currentRisk.riskLevel" />
           <span class="text-slate-600">Score {{ supplier.currentRisk.score }}/100</span>
           <span v-if="supplier.currentRisk.notes" class="text-slate-500">{{ supplier.currentRisk.notes }}</span>
         </div>
@@ -393,5 +432,16 @@ async function handleRecordRisk() {
         </form>
       </div>
     </div>
+
+    <ConfirmDialog
+      :open="pendingAction !== null"
+      :title="confirmTitle"
+      :message="confirmMessage"
+      :confirm-label="pendingAction === 'suspend' ? 'Suspend' : 'Blacklist'"
+      tone="danger"
+      :busy="actionBusy"
+      @confirm="confirmAction"
+      @cancel="pendingAction = null"
+    />
   </section>
 </template>

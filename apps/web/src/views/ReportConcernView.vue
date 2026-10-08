@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useWhistleblowerStore } from '../stores/whistleblower'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import AlertBanner from '../components/ui/AlertBanner.vue'
 
 const store = useWhistleblowerStore()
 
@@ -75,14 +78,10 @@ function formatCategory(category: string): string {
 
 <template>
   <section class="mx-auto max-w-2xl px-4 py-10">
-    <div class="page-header">
-      <h1 class="page-title">Report a Concern</h1>
-      <p class="page-subtitle">
-        Anonymous by default. No account, no sign-in, and no personal information is required to
-        submit or follow up on a report. You'll receive a tracking code — save it, it's the only
-        way to check on your report or add more information later.
-      </p>
-    </div>
+    <PageHeader
+      title="Report a concern"
+      subtitle="Anonymous by default. No account, no sign-in, and no personal information is required to submit or follow up on a report. You'll receive a tracking code — save it, it's the only way to check on your report or add more information later."
+    />
 
     <nav class="mt-6 flex gap-1 border-b border-slate-200 text-sm" aria-label="Report a concern sections">
       <button
@@ -103,33 +102,24 @@ function formatCategory(category: string): string {
       </button>
     </nav>
 
-    <p v-if="store.error" class="mt-4 alert-error">
-      {{ store.error }}
-    </p>
+    <AlertBanner v-if="store.error" class="mt-4">{{ store.error }}</AlertBanner>
 
     <!-- Submit -->
     <div v-if="activeTab === 'submit'" class="mt-6">
-      <div v-if="store.submittedTrackingCode" class="rounded-xl border border-emerald-200 bg-emerald-50 p-6">
-        <h2 class="text-sm font-medium text-emerald-900">Report submitted</h2>
-        <p class="mt-1 text-sm text-emerald-800">
-          Your tracking code — save this now, it will not be shown again and cannot be recovered:
-        </p>
+      <AlertBanner v-if="store.submittedTrackingCode" tone="success" title="Report submitted">
+        <p>Your tracking code — save this now, it will not be shown again and cannot be recovered:</p>
         <div class="mt-2 flex items-center gap-2">
-          <code class="flex-1 rounded-md border border-emerald-300 bg-white px-3 py-2 font-mono text-sm">{{
+          <code class="flex-1 rounded-md border border-success/30 bg-white px-3 py-2 font-mono text-sm text-slate-900">{{
             store.submittedTrackingCode
           }}</code>
-          <button type="button" class="btn btn-secondary btn-sm text-emerald-700" @click="copyTrackingCode">
+          <button type="button" class="btn btn-secondary btn-sm" @click="copyTrackingCode">
             {{ copiedTrackingCode ? 'Copied' : 'Copy' }}
           </button>
         </div>
-        <button
-          type="button"
-          class="btn btn-ghost btn-sm mt-3 text-emerald-700"
-          @click="store.submittedTrackingCode = null"
-        >
+        <button type="button" class="btn btn-ghost btn-sm mt-3" @click="store.submittedTrackingCode = null">
           Submit another report
         </button>
-      </div>
+      </AlertBanner>
 
       <form v-else class="space-y-3" @submit.prevent="handleSubmit">
         <div>
@@ -183,9 +173,9 @@ function formatCategory(category: string): string {
       </form>
 
       <div v-if="store.reportStatus" class="mt-4 card p-4 text-sm">
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between gap-2">
           <span class="font-medium text-slate-900">{{ formatCategory(store.reportStatus.category) }}</span>
-          <span class="badge badge-neutral">{{ store.reportStatus.status }}</span>
+          <StatusBadge :status="store.reportStatus.status" />
         </div>
         <p class="mt-2 text-slate-600">{{ store.reportStatus.description }}</p>
 

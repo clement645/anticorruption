@@ -26,7 +26,16 @@ const mfaEnabled = ref<boolean | null>(null)
 const orgContext = ref<{ org: string; department: string | null } | null>(null)
 
 const crumbs = computed(() => breadcrumbsFor(route.path))
-const pageTitle = computed(() => titleFor(route.path) ?? 'B-PFMPS')
+// A dynamic route (e.g. /suppliers/:id) has no exact entry in the nav/title
+// map, so fall back to its own last breadcrumb ("Details") before the app
+// name — the page itself already shows the specific record's name as its
+// own heading, so this only needs to orient, not duplicate that.
+const pageTitle = computed(() => {
+  const exact = titleFor(route.path)
+  if (exact) return exact
+  const trail = crumbs.value
+  return trail.length > 0 ? trail[trail.length - 1].label : 'B-PFMPS'
+})
 const initials = computed(() => (auth.user?.email ?? '').slice(0, 2).toUpperCase())
 const primaryRole = computed(() => auth.user?.roles?.[0] ?? '—')
 

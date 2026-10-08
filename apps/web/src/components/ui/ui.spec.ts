@@ -37,6 +37,20 @@ describe('status registry', () => {
     expect(statusFor('REJECT')).toEqual({ label: 'Rejected', tone: 'danger' })
   })
 
+  it('treats a substantiated whistleblower finding as the accountability system succeeding, not a bad outcome', () => {
+    expect(statusFor('SUBSTANTIATED').tone).toBe('success')
+    expect(statusFor('UNSUBSTANTIATED').tone).toBe('danger')
+  })
+
+  it('marks a blacklisted supplier at the critical tone, not just danger', () => {
+    expect(statusFor('BLACKLISTED')).toEqual({ label: 'Blacklisted', tone: 'critical' })
+  })
+
+  it('distinguishes a toggleable setting (MFA, etc.) from an account status', () => {
+    expect(statusFor('ENABLED')).toEqual({ label: 'Enabled', tone: 'success' })
+    expect(statusFor('DISABLED')).toEqual({ label: 'Not enabled', tone: 'warning' })
+  })
+
   it('maps the risk-alert review statuses', () => {
     expect(statusFor('OPEN').tone).toBe('warning')
     expect(statusFor('CONFIRMED').tone).toBe('danger')
