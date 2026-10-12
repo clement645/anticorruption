@@ -251,7 +251,7 @@ async function confirmAction() {
     </div>
 
     <!-- Procurement Plans -->
-    <div v-if="auth.hasPermission('procurement:manage')" class="mt-6 card p-6">
+    <div v-if="auth.hasPermission('procurement:manage') || auth.hasPermission('procurement:approve')" class="mt-6 card p-6">
       <h2 class="section-title">Procurement Plans</h2>
       <div class="overflow-x-auto">
       <table class="mt-2 w-full text-xs">
@@ -274,7 +274,11 @@ async function confirmAction() {
         </tbody>
       </table>
       </div>
-      <form class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="handleCreatePlan">
+      <form
+        v-if="auth.hasPermission('procurement:manage')"
+        class="mt-3 flex flex-wrap items-end gap-2"
+        @submit.prevent="handleCreatePlan"
+      >
         <select v-model="newPlan.organizationId" required aria-label="Organization" class="select w-auto max-w-full">
           <option value="" disabled>Organization</option>
           <option v-for="org in organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
