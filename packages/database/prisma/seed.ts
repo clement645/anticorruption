@@ -362,6 +362,15 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "procurement:read",
     "procurement:create",
     "procurement:publish",
+    // Read-only — found missing during manual testing (plans and requests
+    // reference a fiscal year and an allocation, both picked from a
+    // dropdown the UI populates from GET /fiscal-years and GET
+    // /allocations, which both require budget:read). Without it the role
+    // that has to create these records couldn't see what to create them
+    // against, even though creating/publishing a plan or request never
+    // touches budget:approve/commit/spend/adjust — this grants visibility
+    // only, not any budget authority.
+    "budget:read",
     "supplier:read",
     "supplier:read_sensitive",
     "supplier:manage",
