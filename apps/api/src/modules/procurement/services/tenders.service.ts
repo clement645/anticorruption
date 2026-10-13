@@ -15,7 +15,9 @@ import type { TenderView } from '../procurement.types';
 type Actor = { sub: string; email: string; organizationId: string | null };
 type RequestMeta = { ipAddress?: string; userAgent?: string };
 
-type TenderWithLots = Prisma.TenderGetPayload<{ include: { lots: true } }>;
+type TenderWithLots = Prisma.TenderGetPayload<{
+  include: { lots: { include: { award: true } } };
+}>;
 
 function toView(tender: TenderWithLots): TenderView {
   return {
@@ -33,6 +35,16 @@ function toView(tender: TenderWithLots): TenderView {
       lotNumber: lot.lotNumber,
       description: lot.description,
       estimatedAmount: lot.estimatedAmount.toString(),
+      award: lot.award
+        ? {
+            id: lot.award.id,
+            tenderLotId: lot.award.tenderLotId,
+            bidId: lot.award.bidId,
+            awardedAmount: lot.award.awardedAmount.toString(),
+            awardedById: lot.award.awardedById,
+            createdAt: lot.award.createdAt.toISOString(),
+          }
+        : null,
     })),
     createdAt: tender.createdAt.toISOString(),
   };
@@ -98,7 +110,7 @@ export class TendersService {
           })),
         },
       },
-      include: { lots: true },
+      include: { lots: { include: { award: true } } },
     });
 
     await this.auditService.append({
@@ -124,7 +136,7 @@ export class TendersService {
   async list(status?: string): Promise<TenderView[]> {
     const tenders = await this.prisma.tender.findMany({
       where: status ? { status: status as TenderStatus } : undefined,
-      include: { lots: true },
+      include: { lots: { include: { award: true } } },
       orderBy: { createdAt: 'desc' },
     });
     return tenders.map(toView);
@@ -133,7 +145,7 @@ export class TendersService {
   async getByIdOrThrow(id: string): Promise<TenderWithLots> {
     const tender = await this.prisma.tender.findUnique({
       where: { id },
-      include: { lots: true },
+      include: { lots: { include: { award: true } } },
     });
     if (!tender) {
       throw new NotFoundException('Tender not found');
@@ -160,7 +172,7 @@ export class TendersService {
     const updated = await this.prisma.tender.update({
       where: { id },
       data: { status: 'PUBLISHED', publishedAt: new Date() },
-      include: { lots: true },
+      include: { lots: { include: { award: true } } },
     });
 
     await this.auditService.append({
@@ -194,7 +206,7 @@ export class TendersService {
     const updated = await this.prisma.tender.update({
       where: { id },
       data: { status: 'CLOSED', closedAt: new Date() },
-      include: { lots: true },
+      include: { lots: { include: { award: true } } },
     });
 
     await this.auditService.append({
@@ -237,7 +249,7 @@ export class TendersService {
     const updated = await this.prisma.tender.update({
       where: { id },
       data: { status: 'CANCELLED' },
-      include: { lots: true },
+      include: { lots: { include: { award: true } } },
     });
 
     await this.auditService.append({

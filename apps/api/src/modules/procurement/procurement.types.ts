@@ -42,6 +42,9 @@ export interface TenderLotView {
   lotNumber: string;
   description: string;
   estimatedAmount: string;
+  // Contract creation asks for an Award ID with nowhere in the UI to find
+  // one — this is that place. Null until the lot has been awarded.
+  award: AwardView | null;
 }
 
 export interface TenderView {

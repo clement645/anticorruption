@@ -24,11 +24,21 @@ export interface ProcurementRequest {
   commitmentId: string | null
 }
 
+export interface Award {
+  id: string
+  tenderLotId: string
+  bidId: string
+  awardedAmount: string
+  awardedById: string | null
+  createdAt: string
+}
+
 export interface TenderLot {
   id: string
   lotNumber: string
   description: string
   estimatedAmount: string
+  award: Award | null
 }
 
 export interface Tender {

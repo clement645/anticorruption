@@ -23,6 +23,20 @@ const budget = useBudgetStore()
 
 const organizations = ref<Organization[]>([])
 const expandedLotId = ref<string | null>(null)
+const copiedAwardId = ref<string | null>(null)
+
+async function copyAwardId(awardId: string) {
+  try {
+    await navigator.clipboard.writeText(awardId)
+    copiedAwardId.value = awardId
+    setTimeout(() => {
+      if (copiedAwardId.value === awardId) copiedAwardId.value = null
+    }, 2000)
+  } catch {
+    // Clipboard access can be denied by the browser — the id is already
+    // shown on screen for manual copying either way.
+  }
+}
 
 const newSupplier = reactive({ name: '', registrationNumber: '' })
 const newPlan = reactive({ organizationId: '', fiscalYearId: '', name: '' })
@@ -388,6 +402,15 @@ async function confirmAction() {
             <tr v-for="lot in t.lots" :key="lot.id" class="border-t border-slate-100">
               <td class="py-1 pr-2">{{ lot.lotNumber }} — {{ lot.description }}</td>
               <td class="num py-1 pr-2">{{ money(lot.estimatedAmount) }}</td>
+              <td class="py-1 pr-2">
+                <div v-if="lot.award" class="flex items-center gap-1">
+                  <span class="text-slate-500">Award ID:</span>
+                  <code class="rounded bg-slate-100 px-1 py-0.5">{{ lot.award.id }}</code>
+                  <button type="button" class="btn btn-ghost btn-sm" @click="copyAwardId(lot.award.id)">
+                    {{ copiedAwardId === lot.award.id ? 'Copied' : 'Copy' }}
+                  </button>
+                </div>
+              </td>
               <td class="py-1">
                 <button class="btn btn-ghost btn-sm" @click="toggleLot(lot.id)">
                   {{ expandedLotId === lot.id ? 'Hide bids' : 'View bids' }}
