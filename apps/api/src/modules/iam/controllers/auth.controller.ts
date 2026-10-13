@@ -168,7 +168,14 @@ export class AuthController {
     return {
       httpOnly: true,
       secure: isProduction,
-      sameSite: 'lax',
+      // The frontend (Netlify) and this API (Render) are on different
+      // domains in production, so /auth/refresh is a cross-site fetch —
+      // SameSite=Lax cookies are withheld from those (only exempted for a
+      // top-level GET navigation), which silently broke session restore on
+      // every page reload and every access-token expiry. SameSite=None
+      // requires Secure, which is only true once isProduction is, so this
+      // stays Lax locally where frontend/backend share "localhost".
+      sameSite: isProduction ? 'none' : 'lax',
       path: '/api/v1/auth',
     };
   }
